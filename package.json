@@ -1,0 +1,14 @@
+{
+  "name": "minigames",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c cyan,magenta \"npm run dev --prefix packages/backend\" \"npm run dev --prefix packages/frontend\"",
+    "install:all": "npm install --prefix packages/backend && npm install --prefix packages/frontend",
+    "build": "npm run build --prefix packages/backend && npm run build --prefix packages/frontend",
+    "type-check": "npm run type-check --prefix packages/backend && npm run type-check --prefix packages/frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

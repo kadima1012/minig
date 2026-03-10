@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-surface text-white font-sans antialiased;
+  }
+}
+
+@layer utilities {
+  .game-card-hover {
+    @apply transition-transform duration-200 hover:scale-105 hover:shadow-xl;
+  }
+}
