@@ -15,6 +15,16 @@ export async function seedTestData(userRepo: InMemoryUserRepository) {
     new Date()
   );
 
+  const testUser2 = new UserEntity(
+    randomUUID(),
+    "player2",
+    "player2@test.com",
+    hash,
+    new Date()
+  );
+
   await userRepo.create(testUser);
+  await userRepo.create(testUser2);
   console.log("[seed] Test user created: auner_edy@yahoo.com / password");
+  console.log("[seed] Test user created: player2@test.com / password");
 }

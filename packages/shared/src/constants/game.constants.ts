@@ -32,5 +32,7 @@ export const QUIZ_QUESTION_TIMEOUT_MS = 15000;
 export const FIND_DIFFERENCE_TIME_LIMIT_MS = 60000;
 export const RPS_TOTAL_ROUNDS = 5;
 export const PRICE_COMPARE_TOTAL_ROUNDS = 10;
+export const RPS_ROOM_CODE_LENGTH = 6;
+export const RPS_CHOICE_TIMEOUT_MS = 30000;
 export const BACKEND_PORT = 3001;
 export const FRONTEND_PORT = 5173;

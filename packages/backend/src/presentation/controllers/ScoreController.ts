@@ -7,7 +7,7 @@ import { InMemoryScoreRepository } from "../../infrastructure/repositories/InMem
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 import { userRepo } from "./AuthController";
 
-const scoreRepo = new InMemoryScoreRepository();
+export const scoreRepo = new InMemoryScoreRepository();
 
 const saveScoreUseCase = new SaveScoreUseCase(scoreRepo, userRepo);
 const getLeaderboardUseCase = new GetLeaderboardUseCase(scoreRepo);

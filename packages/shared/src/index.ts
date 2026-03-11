@@ -10,6 +10,7 @@ export * from "./types/find-difference.types";
 export * from "./types/price-compare.types";
 export * from "./types/auth.types";
 export * from "./types/score.types";
+export * from "./types/rps-multiplayer.types";
 
 // Constants
 export * from "./constants/game.constants";

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { gsap } from "gsap";
 import { GameId, RpsChoice } from "@minigames/shared";
@@ -18,6 +18,7 @@ export function RpsPage() {
   const { saveScore, getBest, loadBestScores } = useScores();
   const resultRef = useRef<HTMLDivElement>(null);
   const scoreSavedRef = useRef(false);
+  const [mode, setMode] = useState<"choose" | "cpu">("choose");
 
   useEffect(() => {
     loadBestScores();
@@ -40,6 +41,41 @@ export function RpsPage() {
     scoreSavedRef.current = false;
     restart();
   };
+
+  if (mode === "choose") {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center px-4">
+        <div className="flex flex-col items-center gap-6">
+          <h2 className="text-3xl font-bold">Rock Paper Scissors</h2>
+          <p className="text-gray-400">Choose your game mode:</p>
+          <div className="flex flex-col gap-3 w-64">
+            <Button size="lg" onClick={() => setMode("cpu")}>
+              vs CPU
+            </Button>
+            <Button
+              size="lg"
+              variant="secondary"
+              onClick={() => {
+                if (!user) {
+                  navigate("/login");
+                } else {
+                  navigate("/rps/multiplayer");
+                }
+              }}
+            >
+              vs Player
+            </Button>
+          </div>
+          {!user && (
+            <p className="text-gray-500 text-xs">Multiplayer requires login</p>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
+            ← Home
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (isFinished) {
     const rpsScore = score.wins;
