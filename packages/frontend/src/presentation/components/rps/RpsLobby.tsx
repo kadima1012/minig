@@ -66,6 +66,9 @@ export function RpsLobby({ phase, roomCode, onCreateRoom, onJoinRoom, onBack }: 
         <Button size="lg" onClick={onCreateRoom}>Create Room</Button>
         <Button size="lg" variant="secondary" onClick={() => setMode("join")}>Join Room</Button>
       </div>
+      <p className="text-gray-500 text-xs text-center max-w-xs">
+        Each player needs their own account. Use a different browser or incognito tab for the second player.
+      </p>
       <Button variant="ghost" size="sm" onClick={onBack}>← Back to RPS</Button>
     </div>
   );

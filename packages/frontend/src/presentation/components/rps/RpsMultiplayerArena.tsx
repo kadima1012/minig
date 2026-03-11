@@ -15,9 +15,15 @@ const OUTCOME_COLOR: Record<RoundOutcome, string> = {
 };
 
 const OUTCOME_LABEL: Record<RoundOutcome, string> = {
-  [RoundOutcome.Win]: "You Win!",
-  [RoundOutcome.Lose]: "You Lose!",
-  [RoundOutcome.Draw]: "Draw!",
+  [RoundOutcome.Win]: "You Win This Round!",
+  [RoundOutcome.Lose]: "You Lost This Round!",
+  [RoundOutcome.Draw]: "It's a Draw!",
+};
+
+const OUTCOME_BG: Record<RoundOutcome, string> = {
+  [RoundOutcome.Win]: "bg-green-500/20 text-green-400",
+  [RoundOutcome.Lose]: "bg-red-500/20 text-red-400",
+  [RoundOutcome.Draw]: "bg-yellow-500/20 text-yellow-400",
 };
 
 interface Props {
@@ -66,8 +72,11 @@ export function RpsMultiplayerArena({
       </div>
 
       {lastResult && (
-        <div ref={resultRef} className="text-center">
-          <div className="flex items-center justify-center gap-8 text-6xl mb-3">
+        <div ref={resultRef} className="text-center space-y-3">
+          <div className={`inline-block px-6 py-2 rounded-xl text-lg font-bold ${OUTCOME_BG[lastResult.outcome]}`}>
+            {OUTCOME_LABEL[lastResult.outcome]}
+          </div>
+          <div className="flex items-center justify-center gap-8 text-6xl">
             <div className="text-center">
               <span>{CHOICE_EMOJI[lastResult.yourChoice]}</span>
               <p className="text-xs text-gray-400 mt-1">You</p>
@@ -78,9 +87,11 @@ export function RpsMultiplayerArena({
               <p className="text-xs text-gray-400 mt-1">{opponentUsername}</p>
             </div>
           </div>
-          <p className={`text-2xl font-bold ${OUTCOME_COLOR[lastResult.outcome]}`}>
-            {OUTCOME_LABEL[lastResult.outcome]}
-          </p>
+          <div className="flex justify-center gap-6 text-sm">
+            <span className="text-green-400 font-semibold">{lastResult.scores.you.wins}W</span>
+            <span className="text-yellow-400 font-semibold">{lastResult.scores.you.draws}D</span>
+            <span className="text-red-400 font-semibold">{lastResult.scores.you.losses}L</span>
+          </div>
         </div>
       )}
 

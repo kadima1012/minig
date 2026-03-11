@@ -14,10 +14,10 @@ interface SubmitResult {
 export class SubmitMultiplayerChoiceUseCase {
   constructor(private roomRepo: IRpsRoomRepository) {}
 
-  execute(userId: string, choice: RpsChoice): SubmitResult {
-    const room = this.roomRepo.findByPlayerId(userId);
-    if (!room) throw new Error("Not in a room");
-    if (room.status !== "playing") throw new Error("Game is not in progress");
+  execute(roomCode: string, userId: string, choice: RpsChoice): SubmitResult {
+    const room = this.roomRepo.findByCode(roomCode);
+    if (!room) throw new Error("Room not found");
+    if (room.status !== "playing") throw new Error(`Game is not in progress (status: ${room.status})`);
 
     room.submitChoice(userId, choice);
 

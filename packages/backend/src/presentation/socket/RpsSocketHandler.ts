@@ -48,6 +48,7 @@ export class RpsSocketHandler {
       const room = this.createRoom.execute(this.userId, this.username);
       this.socket.join(room.roomCode);
       this.socket.data.roomCode = room.roomCode;
+      console.log(`[RPS] Room created: ${room.roomCode} by ${this.username} (${this.userId})`);
       this.socket.emit(RpsMultiplayerEvents.ROOM_CREATED, { roomCode: room.roomCode });
     } catch (error) {
       this.emitError(error);
@@ -59,6 +60,7 @@ export class RpsSocketHandler {
       const room = this.joinRoom.execute(roomCode, this.userId, this.username);
       this.socket.join(room.roomCode);
       this.socket.data.roomCode = room.roomCode;
+      console.log(`[RPS] ${this.username} joined room ${room.roomCode}. Status: ${room.status}, Round: ${room.currentRound}`);
 
       // Notify both players
       const sockets = this.io.sockets.adapter.rooms.get(room.roomCode);
@@ -85,7 +87,10 @@ export class RpsSocketHandler {
 
   private async handleSubmitChoice(choice: RpsChoice) {
     try {
-      const result = this.submitChoice.execute(this.userId, choice);
+      const roomCode = this.socket.data.roomCode;
+      if (!roomCode) throw new Error("Not in a room");
+      console.log(`[RPS] ${this.username} submits ${choice} in room ${roomCode}`);
+      const result = this.submitChoice.execute(roomCode, this.userId, choice);
       const room = result.room;
 
       if (!result.roundResolved) {
