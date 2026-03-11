@@ -81,14 +81,9 @@ export function RpsPage() {
           disabled={isFinished}
         />
         {lastResult && !isFinished && (
-          <Button
-            className="w-full"
-            onClick={() => {
-              // lastResult is shown; next click clears it by playing again
-            }}
-          >
-            Next Round →
-          </Button>
+          <p className="text-center text-gray-400 text-sm animate-pulse">
+            Choose your next move!
+          </p>
         )}
       </div>
     </div>

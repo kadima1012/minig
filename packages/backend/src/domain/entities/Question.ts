@@ -13,7 +13,6 @@ export class Question {
   }
 
   calculateScore(timeTakenMs: number): number {
-    if (!this.isCorrect(0)) return 0;
     const timeBonus = Math.max(0, 1 - timeTakenMs / this.timeoutMs);
     return Math.round(50 + timeBonus * 50);
   }

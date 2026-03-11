@@ -22,6 +22,7 @@
 - Each game page must have a "Back to Home" button
 
 ## Git Commits
+- Claude must NEVER create commits — only the user commits manually
 - Format: `<type>(<scope>): <short description>`
 - Types: `feat`, `fix`, `refactor`, `style`, `docs`, `test`, `chore`
 - Scope: game name or package (e.g. `quiz`, `rps`, `frontend`, `backend`, `shared`)
