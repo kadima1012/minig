@@ -8,6 +8,7 @@ export * from "./types/quiz.types";
 export * from "./types/rps.types";
 export * from "./types/find-difference.types";
 export * from "./types/price-compare.types";
+export * from "./types/auth.types";
 
 // Constants
 export * from "./constants/game.constants";

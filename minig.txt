@@ -1,0 +1,6 @@
+Cum sunt stocate datele celor 4 jocuri
+Sistem de autentificare - de cont pentru a putea salva scoruri etc
+La find the difference nu este aceeasi poza in imaginea A si B.
+La rock paper scissor nu merge butonul de next round, doar trebuie sa aleg direct urmatoarea data
+Sistem de achievements
+Cand dau click pe see results la quick quiz arata 0 puncte
