@@ -1,15 +1,27 @@
 import React, { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { gsap } from "gsap";
+import { GameId, RpsChoice } from "@minigames/shared";
 import { useRps } from "../../hooks/useRps";
+import { useAuth } from "../../hooks/useAuth";
+import { useScores } from "../../hooks/useScores";
 import { RpsArena } from "../../components/rps/RpsArena";
 import { Button } from "../../components/common/Button";
-import { RpsChoice, RoundOutcome } from "@minigames/shared";
+import { AuthWarning } from "../../components/common/AuthWarning";
+import { Leaderboard } from "../../components/common/Leaderboard";
+import { PersonalBest } from "../../components/common/PersonalBest";
 
 export function RpsPage() {
   const navigate = useNavigate();
   const { round, totalRounds, lastResult, score, isPlaying, isFinished, play, restart } = useRps();
+  const { user } = useAuth();
+  const { saveScore, getBest, loadBestScores } = useScores();
   const resultRef = useRef<HTMLDivElement>(null);
+  const scoreSavedRef = useRef(false);
+
+  useEffect(() => {
+    loadBestScores();
+  }, []);
 
   useEffect(() => {
     if (isFinished && resultRef.current) {
@@ -17,36 +29,54 @@ export function RpsPage() {
     }
   }, [isFinished]);
 
+  useEffect(() => {
+    if (isFinished && !scoreSavedRef.current) {
+      scoreSavedRef.current = true;
+      saveScore(GameId.RockPaperScissors, score.wins);
+    }
+  }, [isFinished]);
+
+  const handleRestart = () => {
+    scoreSavedRef.current = false;
+    restart();
+  };
+
   if (isFinished) {
+    const rpsScore = score.wins;
     return (
       <div className="min-h-screen bg-surface flex items-center justify-center px-4">
-        <div ref={resultRef} className="bg-surface-elevated rounded-2xl p-10 text-center max-w-sm w-full shadow-2xl">
-          <div className="text-6xl mb-4">
-            {score.wins > score.losses ? "🏆" : score.wins < score.losses ? "😢" : "🤝"}
-          </div>
-          <h2 className="text-3xl font-bold mb-6">Game Over!</h2>
-          <div className="grid grid-cols-3 gap-4 mb-8 text-center">
-            <div>
-              <div className="text-2xl font-bold text-green-400">{score.wins}</div>
-              <div className="text-xs text-gray-400">Wins</div>
+        <div className="max-w-md w-full space-y-6">
+          <div ref={resultRef} className="bg-surface-elevated rounded-2xl p-10 text-center shadow-2xl space-y-4">
+            <div className="text-6xl">
+              {score.wins > score.losses ? "🏆" : score.wins < score.losses ? "😢" : "🤝"}
             </div>
-            <div>
-              <div className="text-2xl font-bold text-yellow-400">{score.draws}</div>
-              <div className="text-xs text-gray-400">Draws</div>
+            <h2 className="text-3xl font-bold">Game Over!</h2>
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div>
+                <div className="text-2xl font-bold text-green-400">{score.wins}</div>
+                <div className="text-xs text-gray-400">Wins</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-yellow-400">{score.draws}</div>
+                <div className="text-xs text-gray-400">Draws</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-red-400">{score.losses}</div>
+                <div className="text-xs text-gray-400">Losses</div>
+              </div>
             </div>
-            <div>
-              <div className="text-2xl font-bold text-red-400">{score.losses}</div>
-              <div className="text-xs text-gray-400">Losses</div>
+            {user && <PersonalBest bestScore={getBest(GameId.RockPaperScissors)} currentScore={rpsScore} />}
+            {!user && <AuthWarning />}
+            <div className="flex gap-3">
+              <Button variant="secondary" className="flex-1" onClick={() => navigate("/")}>
+                Home
+              </Button>
+              <Button className="flex-1" onClick={handleRestart}>
+                Play Again
+              </Button>
             </div>
           </div>
-          <div className="flex gap-3">
-            <Button variant="secondary" className="flex-1" onClick={() => navigate("/")}>
-              Home
-            </Button>
-            <Button className="flex-1" onClick={restart}>
-              Play Again
-            </Button>
-          </div>
+          <Leaderboard gameId={GameId.RockPaperScissors} />
         </div>
       </div>
     );
@@ -55,6 +85,7 @@ export function RpsPage() {
   return (
     <div className="min-h-screen bg-surface px-4 py-10">
       <div className="max-w-lg mx-auto space-y-8">
+        {!user && <AuthWarning />}
         <div className="flex justify-between items-center">
           <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
             ← Back

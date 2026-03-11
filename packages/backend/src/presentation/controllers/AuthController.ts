@@ -7,7 +7,7 @@ import { PasswordService } from "../../infrastructure/services/PasswordService";
 import { JwtService } from "../../infrastructure/services/JwtService";
 import { AuthenticatedRequest } from "../middleware/authMiddleware";
 
-const userRepo = new InMemoryUserRepository();
+export const userRepo = new InMemoryUserRepository();
 const passwordService = new PasswordService();
 const jwtService = new JwtService();
 

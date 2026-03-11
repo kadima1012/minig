@@ -1,18 +1,26 @@
 import React, { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { gsap } from "gsap";
+import { GameId, QUIZ_QUESTION_TIMEOUT_MS } from "@minigames/shared";
 import { useQuiz } from "../../hooks/useQuiz";
 import { useTimer } from "../../hooks/useTimer";
+import { useAuth } from "../../hooks/useAuth";
+import { useScores } from "../../hooks/useScores";
 import { QuestionCard } from "../../components/quiz/QuestionCard";
 import { TimerBar } from "../../components/common/TimerBar";
 import { ScoreDisplay } from "../../components/common/ScoreDisplay";
 import { Button } from "../../components/common/Button";
-import { QUIZ_QUESTION_TIMEOUT_MS } from "@minigames/shared";
+import { AuthWarning } from "../../components/common/AuthWarning";
+import { Leaderboard } from "../../components/common/Leaderboard";
+import { PersonalBest } from "../../components/common/PersonalBest";
 
 export function QuizPage() {
   const navigate = useNavigate();
   const quiz = useQuiz();
+  const { user } = useAuth();
+  const { saveScore, getBest, loadBestScores } = useScores();
   const startTimeRef = useRef<number>(0);
+  const scoreSavedRef = useRef(false);
 
   const handleTimerExpired = () => {
     if (quiz.currentQuestion && !quiz.lastAnswer) {
@@ -24,6 +32,7 @@ export function QuizPage() {
 
   useEffect(() => {
     quiz.loadQuestions();
+    loadBestScores();
   }, []);
 
   useEffect(() => {
@@ -33,6 +42,13 @@ export function QuizPage() {
       startTimeRef.current = Date.now();
     }
   }, [quiz.currentIndex, quiz.currentQuestion]);
+
+  useEffect(() => {
+    if (quiz.isFinished && !scoreSavedRef.current) {
+      scoreSavedRef.current = true;
+      saveScore(GameId.Quiz, quiz.score);
+    }
+  }, [quiz.isFinished]);
 
   const handleAnswer = async (index: number) => {
     timer.stop();
@@ -49,7 +65,15 @@ export function QuizPage() {
   }
 
   if (quiz.isFinished) {
-    return <ResultScreen score={quiz.score} total={quiz.questions.length} onHome={() => navigate("/")} />;
+    return (
+      <ResultScreen
+        score={quiz.score}
+        total={quiz.questions.length}
+        bestScore={getBest(GameId.Quiz)}
+        isLoggedIn={!!user}
+        onHome={() => navigate("/")}
+      />
+    );
   }
 
   if (!quiz.currentQuestion) return null;
@@ -57,6 +81,7 @@ export function QuizPage() {
   return (
     <div className="min-h-screen bg-surface px-4 py-10">
       <div className="max-w-2xl mx-auto space-y-5">
+        {!user && <AuthWarning />}
         <div className="flex justify-between items-center">
           <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
             ← Back
@@ -92,10 +117,14 @@ function LoadingScreen() {
 function ResultScreen({
   score,
   total,
+  bestScore,
+  isLoggedIn,
   onHome,
 }: {
   score: number;
   total: number;
+  bestScore: number | null;
+  isLoggedIn: boolean;
   onHome: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -107,14 +136,19 @@ function ResultScreen({
 
   return (
     <div className="min-h-screen bg-surface flex items-center justify-center px-4">
-      <div ref={ref} className="bg-surface-elevated rounded-2xl p-10 text-center max-w-sm w-full shadow-2xl">
-        <div className="text-6xl mb-4">🏆</div>
-        <h2 className="text-3xl font-bold mb-2">Quiz Complete!</h2>
-        <p className="text-gray-400 mb-6">{total} questions answered</p>
-        <div className="text-5xl font-extrabold text-primary mb-8">{score.toLocaleString()}</div>
-        <Button className="w-full" onClick={onHome}>
-          Back to Home
-        </Button>
+      <div className="max-w-md w-full space-y-6">
+        <div ref={ref} className="bg-surface-elevated rounded-2xl p-10 text-center shadow-2xl space-y-4">
+          <div className="text-6xl">🏆</div>
+          <h2 className="text-3xl font-bold">Quiz Complete!</h2>
+          <p className="text-gray-400">{total} questions answered</p>
+          <div className="text-5xl font-extrabold text-primary">{score.toLocaleString()}</div>
+          {isLoggedIn && <PersonalBest bestScore={bestScore} currentScore={score} />}
+          {!isLoggedIn && <AuthWarning />}
+          <Button className="w-full" onClick={onHome}>
+            Back to Home
+          </Button>
+        </div>
+        <Leaderboard gameId={GameId.Quiz} />
       </div>
     </div>
   );

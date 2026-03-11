@@ -1,10 +1,16 @@
 import React, { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { gsap } from "gsap";
+import { GameId } from "@minigames/shared";
 import { usePriceCompare } from "../../hooks/usePriceCompare";
+import { useAuth } from "../../hooks/useAuth";
+import { useScores } from "../../hooks/useScores";
 import { ProductCard } from "../../components/price-compare/ProductCard";
 import { ScoreDisplay } from "../../components/common/ScoreDisplay";
 import { Button } from "../../components/common/Button";
+import { AuthWarning } from "../../components/common/AuthWarning";
+import { Leaderboard } from "../../components/common/Leaderboard";
+import { PersonalBest } from "../../components/common/PersonalBest";
 
 export function PriceComparePage() {
   const navigate = useNavigate();
@@ -23,10 +29,14 @@ export function PriceComparePage() {
     loadPair,
   } = usePriceCompare();
 
+  const { user } = useAuth();
+  const { saveScore, getBest, loadBestScores } = useScores();
   const streakRef = useRef<HTMLSpanElement>(null);
+  const scoreSavedRef = useRef(false);
 
   useEffect(() => {
     start();
+    loadBestScores();
   }, []);
 
   useEffect(() => {
@@ -35,12 +45,24 @@ export function PriceComparePage() {
     }
   }, [streak]);
 
+  useEffect(() => {
+    if (isFinished && !scoreSavedRef.current) {
+      scoreSavedRef.current = true;
+      saveScore(GameId.PriceCompare, score);
+    }
+  }, [isFinished]);
+
   const handleGuess = async (side: "A" | "B") => {
     await submitGuess(side);
   };
 
   const handleNext = () => {
     loadPair();
+  };
+
+  const handleRestart = () => {
+    scoreSavedRef.current = false;
+    start();
   };
 
   if (isLoading && !pair) {
@@ -61,12 +83,21 @@ export function PriceComparePage() {
   }
 
   if (isFinished) {
-    return <ResultScreen score={score} onHome={() => navigate("/")} onRestart={start} />;
+    return (
+      <ResultScreen
+        score={score}
+        bestScore={getBest(GameId.PriceCompare)}
+        isLoggedIn={!!user}
+        onHome={() => navigate("/")}
+        onRestart={handleRestart}
+      />
+    );
   }
 
   return (
     <div className="min-h-screen bg-surface px-4 py-10">
       <div className="max-w-3xl mx-auto space-y-6">
+        {!user && <AuthWarning />}
         <div className="flex justify-between items-center">
           <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
             ← Back
@@ -77,7 +108,7 @@ export function PriceComparePage() {
           <div className="flex items-center gap-4">
             {streak > 1 && (
               <span ref={streakRef} className="text-amber-400 font-bold text-sm">
-                🔥 {streak}x streak
+                {streak}x streak
               </span>
             )}
             <ScoreDisplay score={score} />
@@ -116,7 +147,7 @@ export function PriceComparePage() {
                 result.correct ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"
               }`}
             >
-              {result.correct ? "✅ Correct!" : "❌ Wrong!"}
+              {result.correct ? "Correct!" : "Wrong!"}
               {result.correct && streak > 1 && ` +${streak * 10} bonus`}
             </div>
             <Button className="w-full" onClick={handleNext}>
@@ -131,10 +162,14 @@ export function PriceComparePage() {
 
 function ResultScreen({
   score,
+  bestScore,
+  isLoggedIn,
   onHome,
   onRestart,
 }: {
   score: number;
+  bestScore: number | null;
+  isLoggedIn: boolean;
   onHome: () => void;
   onRestart: () => void;
 }) {
@@ -147,18 +182,23 @@ function ResultScreen({
 
   return (
     <div className="min-h-screen bg-surface flex items-center justify-center px-4">
-      <div ref={ref} className="bg-surface-elevated rounded-2xl p-10 text-center max-w-sm w-full shadow-2xl">
-        <div className="text-6xl mb-4">💰</div>
-        <h2 className="text-3xl font-bold mb-2">Round Complete!</h2>
-        <div className="text-5xl font-extrabold text-amber-400 my-6">{score.toLocaleString()}</div>
-        <div className="flex gap-3">
-          <Button variant="secondary" className="flex-1" onClick={onHome}>
-            Home
-          </Button>
-          <Button className="flex-1" onClick={onRestart}>
-            Play Again
-          </Button>
+      <div className="max-w-md w-full space-y-6">
+        <div ref={ref} className="bg-surface-elevated rounded-2xl p-10 text-center shadow-2xl space-y-4">
+          <div className="text-6xl">💰</div>
+          <h2 className="text-3xl font-bold">Round Complete!</h2>
+          <div className="text-5xl font-extrabold text-amber-400">{score.toLocaleString()}</div>
+          {isLoggedIn && <PersonalBest bestScore={bestScore} currentScore={score} />}
+          {!isLoggedIn && <AuthWarning />}
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={onHome}>
+              Home
+            </Button>
+            <Button className="flex-1" onClick={onRestart}>
+              Play Again
+            </Button>
+          </div>
         </div>
+        <Leaderboard gameId={GameId.PriceCompare} />
       </div>
     </div>
   );
