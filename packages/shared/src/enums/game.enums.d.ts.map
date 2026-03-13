@@ -1,1 +1,0 @@
-{"version":3,"file":"game.enums.d.ts","sourceRoot":"","sources":["game.enums.ts"],"names":[],"mappings":"AAAA,oBAAY,MAAM;IAChB,IAAI,SAAS;IACb,cAAc,oBAAoB;IAClC,iBAAiB,wBAAwB;IACzC,YAAY,kBAAkB;IAC9B,cAAc,oBAAoB;CACnC;AAED,oBAAY,UAAU;IACpB,IAAI,SAAS;IACb,OAAO,YAAY;IACnB,MAAM,WAAW;IACjB,QAAQ,aAAa;CACtB;AAED,oBAAY,YAAY;IACtB,GAAG,QAAQ;IACX,IAAI,SAAS;IACb,IAAI,SAAS;CACd"}
