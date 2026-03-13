@@ -6,6 +6,7 @@ import { RpsPage } from "./pages/rps/RpsPage";
 import { RpsMultiplayerPage } from "./pages/rps/RpsMultiplayerPage";
 import { FindDifferencePage } from "./pages/find-difference/FindDifferencePage";
 import { PriceComparePage } from "./pages/price-compare/PriceComparePage";
+import { TriviaConquestPage } from "./pages/trivia-conquest/TriviaConquestPage";
 import { LoginPage } from "./pages/auth/LoginPage";
 import { RegisterPage } from "./pages/auth/RegisterPage";
 
@@ -18,6 +19,7 @@ const router = createBrowserRouter([
   { path: "/rps/multiplayer", element: <RpsMultiplayerPage /> },
   { path: "/find-difference", element: <FindDifferencePage /> },
   { path: "/price-compare", element: <PriceComparePage /> },
+  { path: "/trivia-conquest", element: <TriviaConquestPage /> },
 ]);
 
 export function AppRouter() {

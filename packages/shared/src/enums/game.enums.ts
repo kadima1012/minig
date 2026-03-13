@@ -3,6 +3,7 @@ export enum GameId {
   FindDifference = "find-difference",
   RockPaperScissors = "rock-paper-scissors",
   PriceCompare = "price-compare",
+  TriviaConquest = "trivia-conquest",
 }
 
 export enum GameStatus {

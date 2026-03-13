@@ -26,6 +26,12 @@ export const GAMES: BaseGame[] = [
     description: "Guess which product costs more!",
     maxScore: 1000,
   },
+  {
+    id: GameId.TriviaConquest,
+    title: "Trivia Conquest",
+    description: "Conquer territories by winning trivia duels!",
+    maxScore: 0,
+  },
 ];
 
 export const QUIZ_QUESTION_TIMEOUT_MS = 15000;
