@@ -11,7 +11,6 @@ Ameliorare generala:
 navbar? 
 sidebar?
 searchbar?
-gestionare cont.
 
 Verificari : 
 Este protejat de un protocol-handshahe ssl?

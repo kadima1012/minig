@@ -28,6 +28,12 @@ export function HomePage() {
               <span className="text-gray-300 text-sm">
                 Hello, <span className="font-semibold text-indigo-400">{user.username}</span>
               </span>
+              <Link
+                to="/account"
+                className="text-sm text-indigo-400 hover:text-indigo-300 font-medium"
+              >
+                Settings
+              </Link>
               <button
                 onClick={logout}
                 className="text-sm text-gray-400 hover:text-white transition-colors"

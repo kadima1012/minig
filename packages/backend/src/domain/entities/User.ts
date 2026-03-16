@@ -1,11 +1,19 @@
 export class UserEntity {
+  public username: string;
+  public email: string;
+  public passwordHash: string;
+
   constructor(
     public readonly id: string,
-    public readonly username: string,
-    public readonly email: string,
-    public readonly passwordHash: string,
+    username: string,
+    email: string,
+    passwordHash: string,
     public readonly createdAt: Date
-  ) {}
+  ) {
+    this.username = username;
+    this.email = email;
+    this.passwordHash = passwordHash;
+  }
 
   toProfile() {
     return {

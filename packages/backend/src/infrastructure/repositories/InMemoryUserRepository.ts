@@ -20,4 +20,15 @@ export class InMemoryUserRepository implements IUserRepository {
     this.users.push(user);
     return user;
   }
+
+  async update(user: UserEntity): Promise<UserEntity> {
+    const index = this.users.findIndex((u) => u.id === user.id);
+    if (index === -1) throw new Error("User not found");
+    this.users[index] = user;
+    return user;
+  }
+
+  async delete(id: string): Promise<void> {
+    this.users = this.users.filter((u) => u.id !== id);
+  }
 }
