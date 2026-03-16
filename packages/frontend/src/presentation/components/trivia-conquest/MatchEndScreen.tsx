@@ -34,8 +34,7 @@ export function MatchEndScreen({ data, myUserId, onPlayAgain, onBackHome }: Matc
               <th className="px-3 py-2 text-left">#</th>
               <th className="px-3 py-2 text-left">Player</th>
               <th className="px-3 py-2 text-right">Territories</th>
-              <th className="px-3 py-2 text-right">Duels</th>
-              <th className="px-3 py-2 text-right">Points</th>
+              <th className="px-3 py-2 text-right">Duels Won</th>
             </tr>
           </thead>
           <tbody>
@@ -58,7 +57,6 @@ export function MatchEndScreen({ data, myUserId, onPlayAgain, onBackHome }: Matc
                   </td>
                   <td className="px-3 py-2 text-right font-mono">{entry.territoryCount}</td>
                   <td className="px-3 py-2 text-right font-mono">{entry.duelsWon}</td>
-                  <td className="px-3 py-2 text-right font-mono">{entry.matchPoints}</td>
                 </tr>
               );
             })}

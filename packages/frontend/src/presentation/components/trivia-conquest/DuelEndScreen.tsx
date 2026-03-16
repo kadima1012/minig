@@ -131,13 +131,6 @@ export function DuelEndScreen({ resolved, myUserId, opponentUsername, isNeutral,
           )}
         </div>
 
-        {/* Points awarded */}
-        {resolved.pointsAwarded > 0 && (
-          <div className="mt-1 px-4 py-1 bg-white/10 rounded-full text-sm text-yellow-300 font-semibold">
-            +{resolved.pointsAwarded} match points
-          </div>
-        )}
-
         {/* Progress bar auto-dismiss */}
         <div className="mt-2 w-48 h-1 bg-white/10 rounded-full overflow-hidden">
           <div

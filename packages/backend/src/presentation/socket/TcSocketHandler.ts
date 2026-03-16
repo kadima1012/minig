@@ -525,11 +525,6 @@ export class TcSocketHandler {
       newOwnerId: result.hexChanged ? duel.winnerId : match.hexagons.get(duel.hexId)?.ownerId ?? null,
       attackerScore: duel.attackerScore,
       defenderScore: duel.defenderScore,
-      pointsAwarded: duel.winnerId === duel.attackerId
-        ? 10
-        : duel.winnerId === duel.defenderId
-          ? 8
-          : 0,
     };
 
     this.io.to(roomName).emit(TcEvents.DUEL_RESOLVED, resolvedPayload);

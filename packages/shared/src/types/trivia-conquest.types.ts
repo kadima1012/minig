@@ -57,7 +57,6 @@ export interface TcPlayerData {
   username: string;
   color: string;
   territoryCount: number;
-  matchPoints: number;
   duelsWon: number;
   duelsLost: number;
   connected: boolean;
@@ -108,7 +107,6 @@ export interface TcDuelResolved {
   newOwnerId: string | null;
   attackerScore: number;
   defenderScore: number;
-  pointsAwarded: number;
 }
 
 // ── Event Payloads ─────────────────────────────────────────────────
@@ -172,7 +170,6 @@ export interface TcLeaderboardEntry {
   color: string;
   territoryCount: number;
   duelsWon: number;
-  matchPoints: number;
 }
 
 export interface TcMapUpdateEntry {

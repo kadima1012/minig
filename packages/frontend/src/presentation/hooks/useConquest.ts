@@ -134,7 +134,6 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
             username: action.username,
             color: action.color,
             territoryCount: 0,
-            matchPoints: 0,
             duelsWon: 0,
             duelsLost: 0,
             connected: true,

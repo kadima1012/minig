@@ -6,8 +6,6 @@ import {
   TcLeaderboardEntry,
   TC_PLAYER_COLORS,
   TC_WIN_THRESHOLD,
-  TC_MATCH_POINT_ATTACK_WIN,
-  TC_MATCH_POINT_DEFENSE_WIN,
   TC_REVENGE_COOLDOWN_MS,
 } from "@minigames/shared";
 import { TcHexagon } from "./TcHexagon";
@@ -306,7 +304,6 @@ export class TcMatch {
       const previousOwnerId = targetHex.ownerId;
       const attackerPlayer = this.players.get(duel.attackerId)!;
       targetHex.setOwner(duel.attackerId, attackerPlayer.username, attackerPlayer.color);
-      attackerPlayer.matchPoints += TC_MATCH_POINT_ATTACK_WIN;
       attackerPlayer.duelsWon++;
       attackerPlayer.clearRevenge();
       result.hexChanged = true;
@@ -328,7 +325,6 @@ export class TcMatch {
       // Defender wins
       const defenderPlayer = this.players.get(duel.defenderId);
       if (defenderPlayer) {
-        defenderPlayer.matchPoints += TC_MATCH_POINT_DEFENSE_WIN;
         defenderPlayer.duelsWon++;
       }
       const attackerPlayer = this.players.get(duel.attackerId);
@@ -408,14 +404,12 @@ export class TcMatch {
         color: player.color,
         territoryCount: this.getPlayerTerritoryCount(player.userId),
         duelsWon: player.duelsWon,
-        matchPoints: player.matchPoints,
       });
     }
 
     entries.sort((a, b) => {
       if (b.territoryCount !== a.territoryCount) return b.territoryCount - a.territoryCount;
-      if (b.duelsWon !== a.duelsWon) return b.duelsWon - a.duelsWon;
-      return b.matchPoints - a.matchPoints;
+      return b.duelsWon - a.duelsWon;
     });
 
     entries.forEach((e, i) => (e.rank = i + 1));
@@ -440,7 +434,6 @@ export class TcMatch {
       username: p.username,
       color: p.color,
       territoryCount: this.getPlayerTerritoryCount(p.userId),
-      matchPoints: p.matchPoints,
       duelsWon: p.duelsWon,
       duelsLost: p.duelsLost,
       connected: p.connected,
