@@ -178,6 +178,8 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
       return {
         ...state,
         phase: "duel",
+        revengeHexId: null,
+        revengeOpponentId: null,
         duel: {
           duelId: action.duelId,
           hexId: action.hexId,
