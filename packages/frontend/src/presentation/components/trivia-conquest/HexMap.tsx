@@ -47,6 +47,21 @@ export function HexMap({ hexes, myUserId, onHexClick, isInDuel }: HexMapProps) {
     return map;
   }, [hexes]);
 
+  // Visible hex IDs (own territories + their neighbors)
+  const visibleHexIds = useMemo(() => {
+    const visible = new Set<string>();
+    for (const myId of myTerritoryIds) {
+      visible.add(myId);
+      const neighbors = neighborMap.get(myId);
+      if (neighbors) {
+        for (const nId of neighbors) {
+          visible.add(nId);
+        }
+      }
+    }
+    return visible;
+  }, [myTerritoryIds, neighborMap]);
+
   // Attackable hex IDs
   const attackableHexIds = useMemo(() => {
     if (isInDuel) return new Set<string>();
@@ -100,6 +115,7 @@ export function HexMap({ hexes, myUserId, onHexClick, isInDuel }: HexMapProps) {
               isOwn={myTerritoryIds.has(hex.id)}
               isAttackable={attackableHexIds.has(hex.id)}
               isSelected={selectedHexId === hex.id}
+              isFogged={!visibleHexIds.has(hex.id)}
               onClick={() => handleHexClick(hex.id)}
             />
           );

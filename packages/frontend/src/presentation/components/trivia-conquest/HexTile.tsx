@@ -10,6 +10,7 @@ interface HexTileProps {
   isOwn: boolean;
   isAttackable: boolean;
   isSelected: boolean;
+  isFogged: boolean;
   onClick: () => void;
 }
 
@@ -81,11 +82,38 @@ function CategoryIcon({ category, cx, cy, size, color }: { category: string; cx:
   }
 }
 
-export function HexTile({ hex, cx, cy, size, isOwn, isAttackable, isSelected, onClick }: HexTileProps) {
+export function HexTile({ hex, cx, cy, size, isOwn, isAttackable, isSelected, isFogged, onClick }: HexTileProps) {
   const points = useMemo(() => {
     const corners = hexCorners(cx, cy, size);
     return cornersToPointsString(corners);
   }, [cx, cy, size]);
+
+  // Fogged hex: dark shape, no details
+  if (isFogged) {
+    return (
+      <g>
+        <polygon
+          points={points}
+          fill="#1a1a2e"
+          stroke="#2a2a3e"
+          strokeWidth={0.5}
+          opacity={0.6}
+        />
+        <text
+          x={cx}
+          y={cy}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fill="#ffffff15"
+          fontSize={size * 0.4}
+          fontWeight="bold"
+          style={{ pointerEvents: "none" }}
+        >
+          ?
+        </text>
+      </g>
+    );
+  }
 
   const categoryColor = TC_CATEGORY_COLORS[hex.category] || "#6b7280";
   const fillColor = hex.ownerId
