@@ -98,6 +98,7 @@ type ConquestAction =
   | { type: "MATCH_OVER"; data: TcMatchOver }
   | { type: "MATCHMAKING_FOUND"; matchCode: string }
   | { type: "REVENGE_COOLDOWN"; cooldownEndsAt: string }
+  | { type: "DISMISS_DUEL" }
   | { type: "ERROR"; message: string }
   | { type: "CLEAR_ERROR" }
   | { type: "RESET" };
@@ -235,6 +236,9 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
         tiebreaker: null,
       };
 
+    case "DISMISS_DUEL":
+      return { ...state, duel: null, tiebreaker: null };
+
     case "PLAYER_ELIMINATED":
       return {
         ...state,
@@ -350,6 +354,7 @@ export function useConquest() {
 
     uc.onDuelResolved((data) => {
       dispatch({ type: "DUEL_RESOLVED", data });
+      setTimeout(() => dispatch({ type: "DISMISS_DUEL" }), 3000);
     });
 
     uc.onPlayerEliminated((data) => {

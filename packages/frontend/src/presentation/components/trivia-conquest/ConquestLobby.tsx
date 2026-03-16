@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "../common/Button";
 import { TcPlayerData } from "@minigames/shared";
 
@@ -29,12 +29,29 @@ export function ConquestLobby({
 }: ConquestLobbyProps) {
   const [joinCode, setJoinCode] = useState("");
   const [mode, setMode] = useState<"choose" | "join">("choose");
+  const [localCountdown, setLocalCountdown] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (phase === "starting" && startCountdown !== null) {
+      setLocalCountdown(startCountdown);
+      const interval = setInterval(() => {
+        setLocalCountdown((prev) => {
+          if (prev === null || prev <= 1) {
+            clearInterval(interval);
+            return prev === null ? null : prev - 1;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [phase, startCountdown]);
 
   if (phase === "starting") {
     return (
       <div className="flex flex-col items-center gap-6">
         <h2 className="text-2xl font-bold">Match Starting!</h2>
-        <div className="text-6xl font-bold text-primary animate-pulse">{startCountdown}</div>
+        <div className="text-6xl font-bold text-primary animate-pulse">{localCountdown ?? startCountdown}</div>
         <div className="grid grid-cols-4 gap-2">
           {players.map((p) => (
             <div key={p.userId} className="flex items-center gap-2 bg-surface-elevated rounded-lg px-3 py-2">
