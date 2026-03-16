@@ -14,6 +14,7 @@ export const TcEvents = {
   ACCEPT_REVENGE: "tc:accept-revenge",
   DECLINE_REVENGE: "tc:decline-revenge",
   RECONNECT: "tc:reconnect",
+  CHECK_ACTIVE: "tc:check-active",
 
   // Server -> Client
   MATCH_CREATED: "tc:match-created",
@@ -34,6 +35,7 @@ export const TcEvents = {
   MATCHMAKING_FOUND: "tc:matchmaking-found",
   REVENGE_COOLDOWN: "tc:revenge-cooldown",
   RECONNECTED: "tc:reconnected",
+  ACTIVE_MATCH_STATUS: "tc:active-match-status",
   OPPONENT_DISCONNECTED: "tc:opponent-disconnected",
   ERROR: "tc:error",
 } as const;

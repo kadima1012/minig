@@ -56,6 +56,7 @@ export interface ConquestState {
   matchEnd: TcMatchOver | null;
   error: string | null;
   maxPlayers: number;
+  hasActiveMatch: boolean;
 }
 
 const initialState: ConquestState = {
@@ -75,6 +76,7 @@ const initialState: ConquestState = {
   matchEnd: null,
   error: null,
   maxPlayers: 20,
+  hasActiveMatch: false,
 };
 
 // ── Actions ───────────────────────────────────────────────────────
@@ -99,6 +101,7 @@ type ConquestAction =
   | { type: "MATCHMAKING_FOUND"; matchCode: string }
   | { type: "REVENGE_COOLDOWN"; cooldownEndsAt: string }
   | { type: "DISMISS_DUEL" }
+  | { type: "ACTIVE_MATCH_STATUS"; hasActiveMatch: boolean }
   | { type: "OPPONENT_DISCONNECTED"; message: string }
   | { type: "RECONNECTED"; hexes: TcHexData[]; players: TcPlayerData[]; matchTimerEndsAt: string; matchId: string; matchCode: string; leaderboard: TcLeaderboardEntry[] }
   | { type: "ERROR"; message: string }
@@ -256,7 +259,7 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
       return { ...state, leaderboard: action.entries };
 
     case "MATCH_OVER":
-      return { ...state, phase: "finished", matchEnd: action.data, duel: null, tiebreaker: null };
+      return { ...state, phase: "finished", matchEnd: action.data, duel: null, tiebreaker: null, hasActiveMatch: false };
 
     case "MATCHMAKING_FOUND":
       return { ...state, phase: "waiting", matchCode: action.matchCode };
@@ -268,6 +271,9 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
         revengeHexId: null,
         revengeOpponentId: null,
       };
+
+    case "ACTIVE_MATCH_STATUS":
+      return { ...state, hasActiveMatch: action.hasActiveMatch };
 
     case "OPPONENT_DISCONNECTED":
       return {
@@ -437,8 +443,14 @@ export function useConquest() {
       dispatch({ type: "ERROR", message: `Connection failed: ${err.message}` });
     });
 
+    uc.onActiveMatchStatus((data) => {
+      dispatch({ type: "ACTIVE_MATCH_STATUS", hasActiveMatch: data.hasActiveMatch });
+    });
+
     uc.onConnect(() => {
       console.log("[TC] Socket connected");
+      // Check if player has an active match they left
+      uc.checkActiveMatch();
     });
 
     return () => {

@@ -8,6 +8,7 @@ interface ConquestLobbyProps {
   players: TcPlayerData[];
   maxPlayers: number;
   startCountdown: number | null;
+  hasActiveMatch: boolean;
   onCreateMatch: () => void;
   onJoinMatch: (code: string) => void;
   onFindMatch: () => void;
@@ -25,6 +26,7 @@ export function ConquestLobby({
   onCreateMatch,
   onJoinMatch,
   onFindMatch,
+  hasActiveMatch,
   onReconnect,
   onLeave,
   onBack,
@@ -129,15 +131,21 @@ export function ConquestLobby({
         Conquer territories by winning trivia duels! Control the map to win.
       </p>
       <div className="flex flex-col gap-3 w-72">
-        <Button size="lg" onClick={onCreateMatch}>Create Match</Button>
-        <Button size="lg" variant="secondary" onClick={() => setMode("join")}>Join Match</Button>
-        <Button size="lg" variant="ghost" onClick={onFindMatch}>Find Match</Button>
-        <Button size="lg" variant="ghost" onClick={onReconnect}>Rejoin Match</Button>
+        <Button size="lg" onClick={onCreateMatch} disabled={hasActiveMatch}>Create Match</Button>
+        <Button size="lg" variant="secondary" onClick={() => setMode("join")} disabled={hasActiveMatch}>Join Match</Button>
+        <Button size="lg" variant="ghost" onClick={onFindMatch} disabled={hasActiveMatch}>Find Match</Button>
+        <Button size="lg" onClick={onReconnect}>Rejoin Match</Button>
       </div>
-      <p className="text-gray-500 text-xs text-center max-w-xs">
-        Create a match and share the code, or use Find Match for automatic matchmaking.
-        Use Rejoin if you disconnected from an active match.
-      </p>
+      {hasActiveMatch && (
+        <p className="text-yellow-400 text-sm text-center max-w-xs">
+          You have an active match. Rejoin to continue or wait for it to end.
+        </p>
+      )}
+      {!hasActiveMatch && (
+        <p className="text-gray-500 text-xs text-center max-w-xs">
+          Create a match and share the code, or use Find Match for automatic matchmaking.
+        </p>
+      )}
       <Button variant="ghost" size="sm" onClick={onBack}>← Back to Home</Button>
     </div>
   );

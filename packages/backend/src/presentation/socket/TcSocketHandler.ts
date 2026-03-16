@@ -75,6 +75,7 @@ export class TcSocketHandler {
     this.socket.on(TcEvents.ACCEPT_REVENGE, () => this.handleAcceptRevenge());
     this.socket.on(TcEvents.DECLINE_REVENGE, () => this.handleDeclineRevenge());
     this.socket.on(TcEvents.RECONNECT, () => this.handleReconnect());
+    this.socket.on(TcEvents.CHECK_ACTIVE, () => this.handleCheckActive());
     this.socket.on("disconnect", () => this.handleDisconnect());
   }
 
@@ -727,6 +728,15 @@ export class TcSocketHandler {
 
     // Resolve the duel normally (territory transfer, leaderboard, etc.)
     this.resolveDuel(duel, matchId);
+  }
+
+  // ── Check Active Match ─────────────────────────────────────────
+
+  private handleCheckActive(): void {
+    const activeMatch = this.matchRepo.findActiveByPlayerId(this.userId);
+    const hasActive = !!(activeMatch && activeMatch.status === TcMatchStatus.Playing);
+    const matchCode = hasActive ? activeMatch!.code : null;
+    this.socket.emit(TcEvents.ACTIVE_MATCH_STATUS, { hasActiveMatch: hasActive, matchCode });
   }
 
   // ── Reconnect ──────────────────────────────────────────────────

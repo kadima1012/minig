@@ -74,6 +74,10 @@ export class ConquestMultiplayerUseCase {
     this.socket.emit(TcEvents.RECONNECT);
   }
 
+  checkActiveMatch(): void {
+    this.socket.emit(TcEvents.CHECK_ACTIVE);
+  }
+
   // ── Listen (Server -> Client) ──────────────────────────────────
 
   onMatchCreated(cb: EventCallback<TcMatchCreated>): void {
@@ -150,6 +154,10 @@ export class ConquestMultiplayerUseCase {
 
   onReconnected(cb: EventCallback<TcReconnected>): void {
     this.socket.on(TcEvents.RECONNECTED, cb);
+  }
+
+  onActiveMatchStatus(cb: EventCallback<{ hasActiveMatch: boolean; matchCode: string | null }>): void {
+    this.socket.on(TcEvents.ACTIVE_MATCH_STATUS, cb);
   }
 
   onError(cb: EventCallback<TcErrorPayload>): void {

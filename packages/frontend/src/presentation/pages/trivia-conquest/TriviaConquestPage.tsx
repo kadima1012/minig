@@ -150,6 +150,7 @@ export function TriviaConquestPage() {
         onCreateMatch={game.createMatch}
         onJoinMatch={game.joinMatch}
         onFindMatch={game.findMatch}
+        hasActiveMatch={game.hasActiveMatch}
         onReconnect={game.reconnect}
         onLeave={game.leaveMatch}
         onBack={() => navigate("/")}

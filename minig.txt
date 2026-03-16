@@ -11,6 +11,8 @@ Ameliorare generala:
 navbar? 
 sidebar?
 searchbar?
+ce se intampla daca pica serverul cu jocurile live?
+
 
 Verificari : 
 Este protejat de un protocol-handshahe ssl?
