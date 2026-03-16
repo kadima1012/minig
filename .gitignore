@@ -5,3 +5,9 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
