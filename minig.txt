@@ -15,21 +15,15 @@ gestionare cont.
 
 Verificari : 
 Este protejat de un protocol-handshahe ssl?
-Când vei face deploy în producție, va trebui HTTPS. Opțiuni:
-
-Reverse proxy (Nginx/Caddy) cu certificat SSL (Let's Encrypt gratuit) — cel mai comun
-Platformă managed (Vercel, Railway, Render) — SSL vine automat
-Cloudflare în față — SSL gratuit fără configurare pe server
-
 Cum monitizezi?
-
 Ce se intampla din punct de vedere endpointuri?
 
-
-
-
 Ameliorare trivia: 
+De ce se da start la 2 jucatori, doar pt testing? Vreau momentan sa inceapa la 2 jucatori pentru easy testing. 
+Jucatorii pot ataca simultan alte hexagoane?
+Legenda sau hover pentru ce reprezinta fiecare hexagon.(sau inlocuieste cu imagini in loc de litere)
 Mai mult timp pentru a alege un raspuns. 
+De cate raspunsuri corecte ai nevoie pentru a cuceri hexagonul atacat
 Dupa ce o persoana ataca o data, nu mai poate face nimic dupa.
 Live chat?
 Am dat leave dintr-un joc intr-unul din teste, am ajuns inapoi la meniul cu minigames, am incercat sa dau la un alt trivia dar spunea "allready in a game" 
