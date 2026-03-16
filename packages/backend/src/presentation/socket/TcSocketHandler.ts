@@ -24,6 +24,10 @@ const MIN_PLAYERS = TC_MIN_PLAYERS_DEV;
 const matchTimers = new Map<string, NodeJS.Timeout>();
 const startCountdowns = new Map<string, NodeJS.Timeout>();
 
+// Cooldown after a match the player abandoned finishes (userId -> cooldownEndsAt)
+const abandonCooldowns = new Map<string, Date>();
+const ABANDON_COOLDOWN_MS = 30_000; // 30 seconds
+
 export class TcSocketHandler {
   private createMatch: CreateMatchUseCase;
   private joinMatch: JoinMatchUseCase;
@@ -76,8 +80,39 @@ export class TcSocketHandler {
 
   // ── Lobby ────────────────────────────────────────────────────────
 
+  /**
+   * Check if the player is blocked from joining/creating new matches.
+   * Returns an error message if blocked, or null if free.
+   */
+  private getJoinBlockReason(): string | null {
+    // Check if player has an active match they left
+    const activeMatch = this.matchRepo.findActiveByPlayerId(this.userId);
+    if (activeMatch && activeMatch.status === TcMatchStatus.Playing) {
+      const player = activeMatch.getPlayer(this.userId);
+      if (player && !player.connected) {
+        return `You have an active match (${activeMatch.code}). Use Rejoin to return.`;
+      }
+    }
+
+    // Check abandon cooldown
+    const cooldownEnd = abandonCooldowns.get(this.userId);
+    if (cooldownEnd && new Date() < cooldownEnd) {
+      const remaining = Math.ceil((cooldownEnd.getTime() - Date.now()) / 1000);
+      return `Cooldown active: ${remaining}s remaining after leaving a match.`;
+    }
+
+    // Clear expired cooldown
+    if (cooldownEnd) {
+      abandonCooldowns.delete(this.userId);
+    }
+
+    return null;
+  }
+
   private handleCreateMatch(): void {
     try {
+      const blockReason = this.getJoinBlockReason();
+      if (blockReason) throw new Error(blockReason);
       const match = this.createMatch.execute(this.userId, this.username);
       const roomName = `tc:${match.id}`;
       this.socket.join(roomName);
@@ -91,6 +126,8 @@ export class TcSocketHandler {
 
   private handleJoinMatch(matchCode: string): void {
     try {
+      const blockReason = this.getJoinBlockReason();
+      if (blockReason) throw new Error(blockReason);
       const { match, player } = this.joinMatch.execute(this.userId, this.username, matchCode);
       const roomName = `tc:${match.id}`;
       this.socket.join(roomName);
@@ -113,6 +150,8 @@ export class TcSocketHandler {
 
   private handleJoinMatchmaking(): void {
     try {
+      const blockReason = this.getJoinBlockReason();
+      if (blockReason) throw new Error(blockReason);
       const { match, player, isNew } = this.autoMatchmake.execute(this.userId, this.username);
       const roomName = `tc:${match.id}`;
       this.socket.join(roomName);
@@ -189,6 +228,18 @@ export class TcSocketHandler {
     match.winnerId = leaderboard.length > 0 ? leaderboard[0].userId : null;
     this.matchRepo.persistToDb(match);
     matchTimers.delete(matchId);
+
+    // Set abandon cooldown for disconnected players
+    this.setAbandonCooldowns(match);
+  }
+
+  /** Set cooldown for players who were disconnected when match ended */
+  private setAbandonCooldowns(match: { players: Map<string, { userId: string; connected: boolean }> }): void {
+    for (const player of match.players.values()) {
+      if (!player.connected) {
+        abandonCooldowns.set(player.userId, new Date(Date.now() + ABANDON_COOLDOWN_MS));
+      }
+    }
   }
 
   // ── Attack & Duel ────────────────────────────────────────────────
@@ -528,6 +579,7 @@ export class TcSocketHandler {
       });
 
       this.matchRepo.persistToDb(match);
+      this.setAbandonCooldowns(match);
     }
   }
 

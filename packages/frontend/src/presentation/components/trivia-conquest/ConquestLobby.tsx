@@ -11,6 +11,7 @@ interface ConquestLobbyProps {
   onCreateMatch: () => void;
   onJoinMatch: (code: string) => void;
   onFindMatch: () => void;
+  onReconnect: () => void;
   onLeave: () => void;
   onBack: () => void;
 }
@@ -24,6 +25,7 @@ export function ConquestLobby({
   onCreateMatch,
   onJoinMatch,
   onFindMatch,
+  onReconnect,
   onLeave,
   onBack,
 }: ConquestLobbyProps) {
@@ -130,9 +132,11 @@ export function ConquestLobby({
         <Button size="lg" onClick={onCreateMatch}>Create Match</Button>
         <Button size="lg" variant="secondary" onClick={() => setMode("join")}>Join Match</Button>
         <Button size="lg" variant="ghost" onClick={onFindMatch}>Find Match</Button>
+        <Button size="lg" variant="ghost" onClick={onReconnect}>Rejoin Match</Button>
       </div>
       <p className="text-gray-500 text-xs text-center max-w-xs">
         Create a match and share the code, or use Find Match for automatic matchmaking.
+        Use Rejoin if you disconnected from an active match.
       </p>
       <Button variant="ghost" size="sm" onClick={onBack}>← Back to Home</Button>
     </div>

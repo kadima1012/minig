@@ -442,7 +442,6 @@ export function useConquest() {
     });
 
     return () => {
-      uc.leaveMatch();
       uc.cleanup();
       disconnectSocket();
     };
