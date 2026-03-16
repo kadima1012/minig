@@ -188,6 +188,16 @@ export class TcDuel {
     this.status = TcDuelStatus.Resolved;
   }
 
+  /** Forfeit: the disconnected player loses instantly */
+  forfeit(disconnectedUserId: string): void {
+    if (disconnectedUserId === this.attackerId) {
+      this.winnerId = this.defenderId;
+    } else if (disconnectedUserId === this.defenderId) {
+      this.winnerId = this.attackerId;
+    }
+    this.status = TcDuelStatus.Resolved;
+  }
+
   isResolved(): boolean {
     return this.status === TcDuelStatus.Resolved;
   }

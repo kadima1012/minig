@@ -70,6 +70,7 @@ export class TcSocketHandler {
     );
     this.socket.on(TcEvents.ACCEPT_REVENGE, () => this.handleAcceptRevenge());
     this.socket.on(TcEvents.DECLINE_REVENGE, () => this.handleDeclineRevenge());
+    this.socket.on(TcEvents.RECONNECT, () => this.handleReconnect());
     this.socket.on("disconnect", () => this.handleDisconnect());
   }
 
@@ -216,8 +217,10 @@ export class TcSocketHandler {
 
       // Notify defender if PvP
       if (duel.defenderId) {
+        const defender = match.getPlayer(duel.defenderId);
         const defenderSocket = this.findPlayerSocket(duel.defenderId, matchId);
-        if (defenderSocket) {
+
+        if (defender?.connected && defenderSocket) {
           defenderSocket.emit(TcEvents.DUEL_STARTED, {
             duelId: duel.id,
             hexId,
@@ -230,6 +233,14 @@ export class TcSocketHandler {
 
       // Send first question
       this.sendDuelQuestion(duel);
+
+      // If defender is disconnected, start CPU defense
+      if (duel.defenderId) {
+        const defender = match.getPlayer(duel.defenderId);
+        if (defender && !defender.connected) {
+          this.startCpuDefense(duel, matchId);
+        }
+      }
     } catch (error) {
       this.emitError(error);
     }
@@ -337,8 +348,14 @@ export class TcSocketHandler {
     if (attackerSocket) attackerSocket.emit(TcEvents.DUEL_QUESTION, payload);
 
     if (duel.defenderId) {
-      const defenderSocket = this.findPlayerSocket(duel.defenderId, matchId);
-      if (defenderSocket) defenderSocket.emit(TcEvents.DUEL_QUESTION, payload);
+      const defender = this.matchRepo.findById(matchId)?.getPlayer(duel.defenderId);
+      if (defender?.connected) {
+        const defenderSocket = this.findPlayerSocket(duel.defenderId, matchId);
+        if (defenderSocket) defenderSocket.emit(TcEvents.DUEL_QUESTION, payload);
+      } else {
+        // CPU answers for disconnected defender
+        this.startCpuDefense(duel, matchId);
+      }
     }
 
     // Auto-timeout after question timeout
@@ -378,8 +395,25 @@ export class TcSocketHandler {
     if (attackerSocket) attackerSocket.emit(TcEvents.DUEL_TIEBREAKER, payload);
 
     if (duel.defenderId) {
-      const defenderSocket = this.findPlayerSocket(duel.defenderId, matchId);
-      if (defenderSocket) defenderSocket.emit(TcEvents.DUEL_TIEBREAKER, payload);
+      const defender = this.matchRepo.findById(matchId)?.getPlayer(duel.defenderId);
+      if (defender?.connected) {
+        const defenderSocket = this.findPlayerSocket(duel.defenderId, matchId);
+        if (defenderSocket) defenderSocket.emit(TcEvents.DUEL_TIEBREAKER, payload);
+      } else if (duel.tiebreakerQuestion) {
+        // CPU answers tiebreaker for disconnected defender
+        const cpuDelay = 2000 + Math.floor(Math.random() * 3000);
+        setTimeout(() => {
+          if (duel.defenderTiebreakerAnswer !== null) return;
+          const correct = duel.tiebreakerQuestion!.numericAnswer;
+          // CPU guesses with 20-50% error
+          const error = correct * (0.2 + Math.random() * 0.3) * (Math.random() < 0.5 ? 1 : -1);
+          duel.submitTiebreakerAnswer(duel.defenderId!, Math.round(correct + error));
+          if (duel.bothAnsweredTiebreaker()) {
+            duel.resolveTiebreaker();
+            this.resolveDuel(duel, matchId);
+          }
+        }, cpuDelay);
+      }
     }
 
     // Auto-timeout for tiebreaker
@@ -571,7 +605,15 @@ export class TcSocketHandler {
       } else {
         // During play, mark as disconnected but don't remove
         const player = match.getPlayer(this.userId);
-        if (player) player.connected = false;
+        if (player) {
+          player.connected = false;
+
+          // Forfeit any active duel
+          const activeDuel = match.findActiveDuelByPlayer(this.userId);
+          if (activeDuel) {
+            this.forfeitDuelForPlayer(activeDuel, this.userId, match.id);
+          }
+        }
         this.io.to(roomName).emit(TcEvents.PLAYER_LEFT, {
           userId: this.userId,
           playerCount: match.players.size,
@@ -591,13 +633,151 @@ export class TcSocketHandler {
     if (!match) return;
 
     const player = match.getPlayer(this.userId);
-    if (player) player.connected = false;
+    if (!player) return;
 
+    player.connected = false;
     const roomName = `tc:${matchId}`;
+
+    // If player was in an active duel, forfeit it
+    if (match.status === TcMatchStatus.Playing) {
+      const activeDuel = match.findActiveDuelByPlayer(this.userId);
+      if (activeDuel) {
+        this.forfeitDuelForPlayer(activeDuel, this.userId, matchId);
+      }
+    }
+
     this.io.to(roomName).emit(TcEvents.PLAYER_LEFT, {
       userId: this.userId,
       playerCount: match.players.size,
     });
+  }
+
+  /** Forfeit a duel for a disconnected player and notify the opponent */
+  private forfeitDuelForPlayer(duel: TcDuel, disconnectedUserId: string, matchId: string): void {
+    duel.forfeit(disconnectedUserId);
+    const match = this.matchRepo.findById(matchId);
+    if (!match) return;
+
+    const disconnectedPlayer = match.getPlayer(disconnectedUserId);
+    const opponentId = disconnectedUserId === duel.attackerId ? duel.defenderId : duel.attackerId;
+
+    // Notify opponent about disconnect win
+    if (opponentId) {
+      const opponentSocket = this.findPlayerSocket(opponentId, matchId);
+      if (opponentSocket) {
+        opponentSocket.emit(TcEvents.OPPONENT_DISCONNECTED, {
+          duelId: duel.id,
+          opponentUsername: disconnectedPlayer?.username ?? "Unknown",
+          message: `${disconnectedPlayer?.username ?? "Opponent"} disconnected. You win the duel!`,
+        });
+      }
+    }
+
+    // Resolve the duel normally (territory transfer, leaderboard, etc.)
+    this.resolveDuel(duel, matchId);
+  }
+
+  // ── Reconnect ──────────────────────────────────────────────────
+
+  private handleReconnect(): void {
+    try {
+      // Find a match where this player exists and is disconnected
+      const match = this.matchRepo.findActiveByPlayerId(this.userId);
+      if (!match) throw new Error("No active match found");
+      if (match.status === TcMatchStatus.Finished) throw new Error("Match already finished");
+
+      const player = match.getPlayer(this.userId);
+      if (!player) throw new Error("Not in this match");
+
+      // Only allow reconnect if player still has territories
+      const territories = match.getPlayerTerritoryCount(this.userId);
+      if (territories === 0 && !player.hasRevenge()) {
+        throw new Error("No territories left. Cannot reconnect.");
+      }
+
+      // Reconnect
+      player.connected = true;
+      const roomName = `tc:${match.id}`;
+      this.socket.join(roomName);
+      this.socket.data.tcMatchId = match.id;
+
+      console.log(`[TC] ${this.username} reconnected to match ${match.code}`);
+
+      // Send full state to reconnected player
+      this.socket.emit(TcEvents.RECONNECTED, {
+        matchId: match.id,
+        matchCode: match.code,
+        hexes: match.getHexesData(),
+        players: match.getPlayersData(),
+        matchTimerEndsAt: match.endsAt?.toISOString() ?? "",
+        leaderboard: match.getLeaderboard(),
+      });
+
+      // Notify others that player is back
+      this.io.to(roomName).emit(TcEvents.PLAYER_JOINED, {
+        userId: this.userId,
+        username: this.username,
+        color: player.color,
+        playerCount: match.players.size,
+        maxPlayers: match.maxPlayers,
+      });
+    } catch (error) {
+      this.emitError(error);
+    }
+  }
+
+  // ── CPU Defense for Disconnected Players ───────────────────────
+
+  private startCpuDefense(duel: TcDuel, matchId: string): void {
+    // CPU auto-answers for the disconnected defender with random answers
+    // Slight delay to simulate "thinking"
+    const answerForCpu = () => {
+      const match = this.matchRepo.findById(matchId);
+      if (!match || duel.isResolved()) return;
+
+      const question = duel.getCurrentQuestion();
+      if (!question || !duel.defenderId) return;
+
+      // Check if defender already answered (might have reconnected)
+      const alreadyAnswered = duel.defenderAnswers.some(
+        (a) => a.questionIndex === duel.currentQuestionIndex
+      );
+      if (alreadyAnswered) return;
+
+      // Check if defender reconnected
+      const defender = match.getPlayer(duel.defenderId);
+      if (defender?.connected) return;
+
+      // CPU picks a random answer with 40% chance of being correct
+      const isCorrect = Math.random() < 0.4;
+      const selectedIndex = isCorrect
+        ? question.correctIndex
+        : [0, 1, 2, 3].filter((i) => i !== question.correctIndex)[Math.floor(Math.random() * 3)];
+      const timeMs = 3000 + Math.floor(Math.random() * 4000); // 3-7s response time
+
+      try {
+        duel.submitAnswer(duel.defenderId, selectedIndex, timeMs);
+
+        // Notify attacker that "opponent" answered
+        const attackerSocket = this.findPlayerSocket(duel.attackerId, matchId);
+        if (attackerSocket) {
+          attackerSocket.emit(TcEvents.OPPONENT_ANSWERED, {
+            duelId: duel.id,
+            questionIndex: duel.currentQuestionIndex,
+          });
+        }
+
+        if (duel.bothAnsweredCurrentQuestion()) {
+          this.handleBothAnswered(duel, match);
+        }
+      } catch {
+        // Answer already submitted or duel resolved
+      }
+    };
+
+    // Delay CPU answer by 2-5 seconds
+    const delay = 2000 + Math.floor(Math.random() * 3000);
+    setTimeout(answerForCpu, delay);
   }
 
   // ── Helpers ──────────────────────────────────────────────────────

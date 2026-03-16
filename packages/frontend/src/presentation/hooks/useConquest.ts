@@ -99,6 +99,8 @@ type ConquestAction =
   | { type: "MATCHMAKING_FOUND"; matchCode: string }
   | { type: "REVENGE_COOLDOWN"; cooldownEndsAt: string }
   | { type: "DISMISS_DUEL" }
+  | { type: "OPPONENT_DISCONNECTED"; message: string }
+  | { type: "RECONNECTED"; hexes: TcHexData[]; players: TcPlayerData[]; matchTimerEndsAt: string; matchId: string; matchCode: string; leaderboard: TcLeaderboardEntry[] }
   | { type: "ERROR"; message: string }
   | { type: "CLEAR_ERROR" }
   | { type: "RESET" };
@@ -265,6 +267,30 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
         revengeOpponentId: null,
       };
 
+    case "OPPONENT_DISCONNECTED":
+      return {
+        ...state,
+        error: action.message,
+        duel: null,
+        tiebreaker: null,
+        phase: "playing",
+      };
+
+    case "RECONNECTED":
+      return {
+        ...state,
+        phase: "playing",
+        hexes: action.hexes,
+        players: action.players,
+        matchTimerEndsAt: action.matchTimerEndsAt,
+        matchId: action.matchId,
+        matchCode: action.matchCode,
+        leaderboard: action.leaderboard,
+        duel: null,
+        tiebreaker: null,
+        error: null,
+      };
+
     case "ERROR":
       return { ...state, error: action.message };
 
@@ -383,6 +409,24 @@ export function useConquest() {
       dispatch({ type: "REVENGE_COOLDOWN", cooldownEndsAt: data.cooldownEndsAt });
     });
 
+    uc.onOpponentDisconnected((data) => {
+      dispatch({ type: "OPPONENT_DISCONNECTED", message: data.message });
+      // Auto-clear the message after 3 seconds
+      setTimeout(() => dispatch({ type: "CLEAR_ERROR" }), 3000);
+    });
+
+    uc.onReconnected((data) => {
+      dispatch({
+        type: "RECONNECTED",
+        hexes: data.hexes,
+        players: data.players,
+        matchTimerEndsAt: data.matchTimerEndsAt,
+        matchId: data.matchId,
+        matchCode: data.matchCode,
+        leaderboard: data.leaderboard,
+      });
+    });
+
     uc.onError((data) => {
       dispatch({ type: "ERROR", message: data.message });
     });
@@ -443,6 +487,10 @@ export function useConquest() {
     useCaseRef.current?.declineRevenge();
   }, []);
 
+  const reconnect = useCallback(() => {
+    useCaseRef.current?.reconnect();
+  }, []);
+
   const clearError = useCallback(() => {
     dispatch({ type: "CLEAR_ERROR" });
   }, []);
@@ -458,6 +506,7 @@ export function useConquest() {
     submitTiebreaker,
     acceptRevenge,
     declineRevenge,
+    reconnect,
     clearError,
   };
 }

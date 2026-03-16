@@ -256,6 +256,15 @@ export class TcMatch {
 
   // ── Duel Management ────────────────────────────────────────────
 
+  findActiveDuelByPlayer(userId: string): TcDuel | null {
+    for (const duel of this.activeDuels.values()) {
+      if (duel.attackerId === userId || duel.defenderId === userId) {
+        if (!duel.isResolved()) return duel;
+      }
+    }
+    return null;
+  }
+
   registerDuel(duel: TcDuel): void {
     this.activeDuels.set(duel.id, duel);
     const attacker = this.players.get(duel.attackerId);

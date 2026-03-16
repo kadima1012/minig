@@ -13,6 +13,7 @@ export const TcEvents = {
   SUBMIT_TIEBREAKER: "tc:submit-tiebreaker",
   ACCEPT_REVENGE: "tc:accept-revenge",
   DECLINE_REVENGE: "tc:decline-revenge",
+  RECONNECT: "tc:reconnect",
 
   // Server -> Client
   MATCH_CREATED: "tc:match-created",
@@ -32,6 +33,8 @@ export const TcEvents = {
   MATCH_OVER: "tc:match-over",
   MATCHMAKING_FOUND: "tc:matchmaking-found",
   REVENGE_COOLDOWN: "tc:revenge-cooldown",
+  RECONNECTED: "tc:reconnected",
+  OPPONENT_DISCONNECTED: "tc:opponent-disconnected",
   ERROR: "tc:error",
 } as const;
 
@@ -193,6 +196,21 @@ export interface TcSubmitAnswerPayload {
 export interface TcSubmitTiebreakerPayload {
   duelId: string;
   numericAnswer: number;
+}
+
+export interface TcOpponentDisconnected {
+  duelId: string;
+  opponentUsername: string;
+  message: string;
+}
+
+export interface TcReconnected {
+  matchId: string;
+  matchCode: string;
+  hexes: TcHexData[];
+  players: TcPlayerData[];
+  matchTimerEndsAt: string;
+  leaderboard: TcLeaderboardEntry[];
 }
 
 export interface TcErrorPayload {

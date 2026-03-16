@@ -18,6 +18,8 @@ import {
   TcRevengeCooldown,
   TcMapUpdateEntry,
   TcErrorPayload,
+  TcOpponentDisconnected,
+  TcReconnected,
 } from "@minigames/shared";
 import { getSocket } from "../../../infrastructure/socket/socketClient";
 
@@ -66,6 +68,10 @@ export class ConquestMultiplayerUseCase {
 
   declineRevenge(): void {
     this.socket.emit(TcEvents.DECLINE_REVENGE);
+  }
+
+  reconnect(): void {
+    this.socket.emit(TcEvents.RECONNECT);
   }
 
   // ── Listen (Server -> Client) ──────────────────────────────────
@@ -136,6 +142,14 @@ export class ConquestMultiplayerUseCase {
 
   onRevengeCooldown(cb: EventCallback<TcRevengeCooldown>): void {
     this.socket.on(TcEvents.REVENGE_COOLDOWN, cb);
+  }
+
+  onOpponentDisconnected(cb: EventCallback<TcOpponentDisconnected>): void {
+    this.socket.on(TcEvents.OPPONENT_DISCONNECTED, cb);
+  }
+
+  onReconnected(cb: EventCallback<TcReconnected>): void {
+    this.socket.on(TcEvents.RECONNECTED, cb);
   }
 
   onError(cb: EventCallback<TcErrorPayload>): void {
