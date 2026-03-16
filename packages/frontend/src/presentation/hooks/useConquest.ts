@@ -233,10 +233,12 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
       return { ...state, phase: "tiebreaker", tiebreaker: action.data };
 
     case "DUEL_RESOLVED":
+      // Ignore if this resolved duel is not our active duel
+      if (!state.duel || state.duel.duelId !== action.data.duelId) return state;
       return {
         ...state,
         phase: "playing",
-        duel: state.duel ? { ...state.duel, resolved: action.data } : null,
+        duel: { ...state.duel, resolved: action.data },
         tiebreaker: null,
       };
 
