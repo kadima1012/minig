@@ -23,6 +23,7 @@ export type ConquestPhase =
   | "duel"
   | "duel-result"
   | "tiebreaker"
+  | "duel-ended"
   | "finished";
 
 // ── State ─────────────────────────────────────────────────────────
@@ -32,6 +33,7 @@ export interface ConquestDuelState {
   hexId: string;
   opponentUsername: string | null;
   isNeutral: boolean;
+  isAttacker: boolean;
   currentQuestion: TcDuelQuestionData | null;
   lastResult: TcDuelQuestionResult | null;
   opponentAnswered: boolean;
@@ -88,7 +90,7 @@ type ConquestAction =
   | { type: "MATCH_STARTING"; countdown: number }
   | { type: "MATCH_STARTED"; hexes: TcHexData[]; players: TcPlayerData[]; matchTimerEndsAt: string; matchId: string; matchCode: string }
   | { type: "MAP_UPDATE"; updates: TcMapUpdateEntry[] }
-  | { type: "DUEL_STARTED"; duelId: string; hexId: string; category: string; opponentUsername: string | null; isNeutral: boolean }
+  | { type: "DUEL_STARTED"; duelId: string; hexId: string; category: string; opponentUsername: string | null; isNeutral: boolean; isAttacker: boolean }
   | { type: "DUEL_QUESTION"; question: TcDuelQuestionData }
   | { type: "OPPONENT_ANSWERED" }
   | { type: "SUBMIT_ANSWER"; selectedIndex: number }
@@ -190,6 +192,7 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
           hexId: action.hexId,
           opponentUsername: action.opponentUsername,
           isNeutral: action.isNeutral,
+          isAttacker: action.isAttacker,
           currentQuestion: null,
           lastResult: null,
           opponentAnswered: false,
@@ -240,13 +243,13 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
       if (!state.duel || state.duel.duelId !== action.data.duelId) return state;
       return {
         ...state,
-        phase: "playing",
+        phase: "duel-ended",
         duel: { ...state.duel, resolved: action.data },
         tiebreaker: null,
       };
 
     case "DISMISS_DUEL":
-      return { ...state, duel: null, tiebreaker: null };
+      return { ...state, phase: "playing", duel: null, tiebreaker: null };
 
     case "PLAYER_ELIMINATED":
       return {
@@ -369,6 +372,7 @@ export function useConquest() {
         category: data.category,
         opponentUsername: data.opponentUsername,
         isNeutral: data.isNeutral,
+        isAttacker: data.isAttacker,
       });
     });
 
@@ -390,7 +394,7 @@ export function useConquest() {
 
     uc.onDuelResolved((data) => {
       dispatch({ type: "DUEL_RESOLVED", data });
-      setTimeout(() => dispatch({ type: "DISMISS_DUEL" }), 3000);
+      setTimeout(() => dispatch({ type: "DISMISS_DUEL" }), 4000);
     });
 
     uc.onPlayerEliminated((data) => {

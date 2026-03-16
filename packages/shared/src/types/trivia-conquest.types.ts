@@ -141,6 +141,7 @@ export interface TcDuelStarted {
   category: TcCategory;
   opponentUsername: string | null;
   isNeutral: boolean;
+  isAttacker: boolean;
 }
 
 export interface TcOpponentAnswered {

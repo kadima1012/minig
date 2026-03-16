@@ -10,6 +10,7 @@ import { MatchHeader } from "../../components/trivia-conquest/MatchHeader";
 import { PlayerList } from "../../components/trivia-conquest/PlayerList";
 import { MatchEndScreen } from "../../components/trivia-conquest/MatchEndScreen";
 import { RevengePopup } from "../../components/trivia-conquest/RevengePopup";
+import { DuelEndScreen } from "../../components/trivia-conquest/DuelEndScreen";
 
 export function TriviaConquestPage() {
   const navigate = useNavigate();
@@ -55,8 +56,8 @@ export function TriviaConquestPage() {
     );
   }
 
-  // Playing / Duel / Tiebreaker
-  if (game.phase === "playing" || game.phase === "duel" || game.phase === "duel-result" || game.phase === "tiebreaker") {
+  // Playing / Duel / Tiebreaker / Duel End
+  if (game.phase === "playing" || game.phase === "duel" || game.phase === "duel-result" || game.phase === "tiebreaker" || game.phase === "duel-ended") {
     const myTerritoryCount = game.hexes.filter((h) => h.ownerId === user.id).length;
 
     return (
@@ -124,6 +125,17 @@ export function TriviaConquestPage() {
         {/* Tiebreaker overlay */}
         {game.phase === "tiebreaker" && game.tiebreaker && (
           <TiebreakerScreen data={game.tiebreaker} onSubmit={game.submitTiebreaker} />
+        )}
+
+        {/* Duel end result overlay */}
+        {game.phase === "duel-ended" && game.duel?.resolved && (
+          <DuelEndScreen
+            resolved={game.duel.resolved}
+            myUserId={user.id}
+            opponentUsername={game.duel.opponentUsername}
+            isNeutral={game.duel.isNeutral}
+            isAttacker={game.duel.isAttacker}
+          />
         )}
 
         {/* Revenge popup */}

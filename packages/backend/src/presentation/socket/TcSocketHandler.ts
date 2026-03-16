@@ -265,6 +265,7 @@ export class TcSocketHandler {
           ? match.getPlayer(duel.defenderId)?.username ?? null
           : null,
         isNeutral: duel.isNeutral,
+        isAttacker: true,
       });
 
       // Notify defender if PvP
@@ -279,6 +280,7 @@ export class TcSocketHandler {
             category: duel.category,
             opponentUsername: this.username,
             isNeutral: false,
+            isAttacker: false,
           });
         }
       }

@@ -1,7 +1,6 @@
 import {
   TcCategory,
   TcDuelStatus,
-  TC_FAST_ANSWER_THRESHOLD_MS,
   TC_NEUTRAL_WIN_THRESHOLD,
 } from "@minigames/shared";
 import { TcTriviaQuestion, TcTiebreakerQuestion } from "./TcTriviaQuestion";
@@ -58,10 +57,7 @@ export class TcDuel {
     if (!question) throw new Error("No current question");
 
     const correct = question.isCorrect(selectedIndex);
-    let points = 0;
-    if (correct) {
-      points = timeMs <= TC_FAST_ANSWER_THRESHOLD_MS ? 2 : 1;
-    }
+    const points = correct ? 1 : 0;
 
     const answer: DuelAnswer = {
       questionIndex: this.currentQuestionIndex,

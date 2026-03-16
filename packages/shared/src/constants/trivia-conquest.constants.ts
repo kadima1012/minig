@@ -2,7 +2,6 @@ export const TC_MATCH_DURATION_MS = 1_200_000; // 20 minutes
 export const TC_DUEL_QUESTIONS = 5;
 export const TC_QUESTION_TIMEOUT_MS = 8_000; // 8 seconds per question
 export const TC_TIEBREAKER_TIMEOUT_MS = 15_000; // 15 seconds for tiebreaker
-export const TC_FAST_ANSWER_THRESHOLD_MS = 4_000; // <= 4s = fast answer (2 pts)
 export const TC_HEX_GRID_RADIUS = 3; // radius 3 = 37 hexes
 export const TC_MIN_PLAYERS_DEV = 2;
 export const TC_MIN_PLAYERS_PROD = 16;
