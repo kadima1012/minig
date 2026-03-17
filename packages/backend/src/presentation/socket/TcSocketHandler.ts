@@ -629,7 +629,11 @@ export class TcSocketHandler {
 
   private finishSimultaneousRound(matchId: string): void {
     const match = this.matchRepo.findById(matchId);
-    if (!match || match.status !== TcMatchStatus.Playing) return;
+    if (!match || match.status !== TcMatchStatus.Playing) {
+      console.log(`[TC] finishSimultaneousRound skipped: match ${matchId} status=${match?.status}`);
+      return;
+    }
+    console.log(`[TC] Match ${match.code} - All simultaneous duels resolved, finishing round`);
 
     // Clean up callbacks
     simultaneousCallbacks.delete(matchId);

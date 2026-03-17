@@ -114,6 +114,31 @@ export function TriviaConquestPage() {
                 onDeselect={game.deselectHex}
               />
             )}
+
+            {/* Phase indicator — always visible when not in planning (which has its own overlay) */}
+            {!isPlanning && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+                <div className="bg-surface-elevated/90 backdrop-blur-sm border border-surface-border rounded-xl px-4 py-2 shadow-lg text-center">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Round {game.roundNumber}</span>
+                    <span className="text-xs text-gray-500">·</span>
+                    <span className={`text-xs font-bold uppercase tracking-wider ${
+                      game.phase === "resolution" ? "text-orange-400" :
+                      game.phase === "duel" || game.phase === "duel-result" ? "text-red-400" :
+                      game.phase === "tiebreaker" ? "text-yellow-400" :
+                      game.phase === "duel-ended" ? "text-green-400" :
+                      "text-gray-400"
+                    }`}>
+                      {game.phase === "resolution" ? "Resolving..." :
+                       game.phase === "duel" || game.phase === "duel-result" ? "Duel in progress" :
+                       game.phase === "tiebreaker" ? "Tiebreaker" :
+                       game.phase === "duel-ended" ? "Duel complete" :
+                       game.phase}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Sidebar */}
