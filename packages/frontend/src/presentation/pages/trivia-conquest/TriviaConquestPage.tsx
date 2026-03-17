@@ -11,6 +11,8 @@ import { PlayerList } from "../../components/trivia-conquest/PlayerList";
 import { MatchEndScreen } from "../../components/trivia-conquest/MatchEndScreen";
 import { RevengePopup } from "../../components/trivia-conquest/RevengePopup";
 import { DuelEndScreen } from "../../components/trivia-conquest/DuelEndScreen";
+import { PlanningOverlay } from "../../components/trivia-conquest/PlanningOverlay";
+import { RoundOrderLegend } from "../../components/trivia-conquest/RoundOrderLegend";
 
 export function TriviaConquestPage() {
   const navigate = useNavigate();
@@ -35,6 +37,13 @@ export function TriviaConquestPage() {
     </div>
   );
 
+  // Surrender notification banner
+  const surrenderBanner = game.surrenderMessage && (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 bg-amber-600/90 text-white px-6 py-3 rounded-xl shadow-lg z-50 animate-pulse">
+      <span>{game.surrenderMessage}</span>
+    </div>
+  );
+
   // Match End
   if (game.phase === "finished" && game.matchEnd) {
     return (
@@ -56,42 +65,74 @@ export function TriviaConquestPage() {
     );
   }
 
-  // Playing / Duel / Tiebreaker / Duel End
-  if (game.phase === "playing" || game.phase === "duel" || game.phase === "duel-result" || game.phase === "tiebreaker" || game.phase === "duel-ended") {
-    const myTerritoryCount = game.hexes.filter((h) => h.ownerId === user.id).length;
+  // Active game phases: playing, planning, resolution, duel, duel-result, tiebreaker, duel-ended
+  const isGameActive = ["playing", "planning", "resolution", "duel", "duel-result", "tiebreaker", "duel-ended"].includes(game.phase);
+
+  if (isGameActive) {
+    const myTerritoryCount = (game.hexes ?? []).filter((h) => h.ownerId === user.id).length;
+    const isInDuel = game.duel !== null;
+    const isPlanning = game.phase === "planning";
+    const isResolution = game.phase === "resolution" || game.phase === "duel" || game.phase === "duel-result" || game.phase === "tiebreaker" || game.phase === "duel-ended";
 
     return (
       <div className="h-screen bg-surface flex flex-col overflow-hidden">
         {errorBanner}
+        {surrenderBanner}
         <MatchHeader
           matchTimerEndsAt={game.matchTimerEndsAt}
           myTerritoryCount={myTerritoryCount}
-          totalHexes={game.hexes.length}
+          totalHexes={(game.hexes ?? []).length}
           matchCode={game.matchCode}
+          hasSurrendered={game.hasSurrendered}
           onLeave={() => {
             game.leaveMatch();
             navigate("/");
           }}
+          onSurrender={game.surrender}
         />
 
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden relative">
           {/* Main hex map */}
-          <div className="flex-1 p-4">
+          <div className="flex-1 p-4 relative">
             <HexMap
               hexes={game.hexes}
               myUserId={user.id}
-              onHexClick={game.attackHex}
-              isInDuel={game.duel !== null}
+              onHexClick={isPlanning ? game.selectHex : game.attackHex}
+              isInDuel={isInDuel}
+              isPlanning={isPlanning}
+              attackableHexIds={isPlanning ? game.attackableHexIds : undefined}
+              mySelectedHexId={isPlanning ? game.mySelectedHexId : undefined}
+              hexSelections={isPlanning ? game.hexSelections : undefined}
             />
+
+            {/* Planning overlay */}
+            {isPlanning && (
+              <PlanningOverlay
+                roundNumber={game.roundNumber}
+                planningEndsAt={game.planningEndsAt}
+                mySelectedHexId={game.mySelectedHexId}
+                onDeselect={game.deselectHex}
+              />
+            )}
           </div>
 
           {/* Sidebar */}
-          <div className="w-56 p-3 border-l border-surface-border overflow-y-auto hidden md:block">
+          <div className="w-60 p-3 border-l border-surface-border overflow-y-auto hidden md:flex flex-col gap-3">
             <PlayerList players={game.players} myUserId={user.id} />
 
+            {/* Round order legend during resolution */}
+            {isResolution && (game.roundOrder ?? []).length > 0 && (
+              <RoundOrderLegend
+                roundNumber={game.roundNumber}
+                order={game.roundOrder}
+                currentDuelInfo={game.currentDuelInfo}
+                myUserId={user.id}
+              />
+            )}
+
             {/* Leaderboard mini */}
-            {game.leaderboard.length > 0 && (
-              <div className="mt-3 bg-surface-elevated rounded-xl p-3">
+            {(game.leaderboard ?? []).length > 0 && (
+              <div className="bg-surface-elevated rounded-xl p-3">
                 <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Leaderboard</h4>
                 {game.leaderboard.slice(0, 5).map((e) => (
                   <div key={e.userId} className="flex items-center gap-2 text-xs py-0.5">

@@ -6,7 +6,9 @@
       "Bash(find /d/Tech/minigames/packages -type f -name *trivia*conquest*)",
       "Bash(find /d/Tech/minigames/packages -type f \\\\\\(-name *.svg -o -name *canvas* -o -name *svg* \\\\\\))",
       "Bash(find /d/Tech/minigames/packages/backend/src/domain -type f -name *Tc*)",
-      "Bash(find /d/Tech/minigames/packages/backend/src/presentation -type f -name *trivia*conquest* -o -name *tc*)"
+      "Bash(find /d/Tech/minigames/packages/backend/src/presentation -type f -name *trivia*conquest* -o -name *tc*)",
+      "Bash(npx --prefix packages/shared tsc --noEmit)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

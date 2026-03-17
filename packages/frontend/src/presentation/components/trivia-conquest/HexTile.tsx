@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { TcHexData } from "@minigames/shared";
+import { TcHexData, TcHexSelectedData } from "@minigames/shared";
 import { hexCorners, cornersToPointsString } from "../../../domain/value-objects/HexGrid";
 
 interface HexTileProps {
@@ -12,6 +12,9 @@ interface HexTileProps {
   isSelected: boolean;
   isFogged: boolean;
   onClick: () => void;
+  isPlanning?: boolean;
+  /** If another player has selected this hex during planning */
+  planningSelection?: TcHexSelectedData;
 }
 
 // ── Deterministic helpers ─────────────────────────────────────────────────────
@@ -221,23 +224,28 @@ function PlayerShield({ cx, cy, size }: { cx: number; cy: number; size: number }
 
 // ── HexTile ───────────────────────────────────────────────────────────────────
 
-export function HexTile({ hex, cx, cy, size, isOwn, isAttackable, isSelected, isFogged, onClick }: HexTileProps) {
+export function HexTile({ hex, cx, cy, size, isOwn, isAttackable, isSelected, isFogged, onClick, isPlanning, planningSelection }: HexTileProps) {
   const points = useMemo(() => cornersToPointsString(hexCorners(cx, cy, size)), [cx, cy, size]);
 
   if (isFogged) {
     return <polygon points={points} fill="#d4d0c8" stroke="#c0bcb4" strokeWidth={1.5} />;
   }
 
+  const clickable = isAttackable || (isPlanning && isSelected);
   const fillColor = hex.ownerId ? hex.ownerColor || "#888" : "#e2ddd4";
+
+  // Planning mode: selected hex gets a bright border, taken by others gets dimmed
   const strokeColor = isSelected
-    ? "#ffffff"
+    ? "#22d3ee" // cyan for my selection during planning
     : isAttackable
       ? "#f0c030"
-      : "rgba(0,0,0,0.18)";
-  const strokeWidth = isSelected ? 3.5 : isAttackable ? 2.5 : 1.5;
+      : planningSelection
+        ? planningSelection.color // show the other player's color
+        : "rgba(0,0,0,0.18)";
+  const strokeWidth = isSelected ? 4 : isAttackable ? 2.5 : planningSelection ? 3 : 1.5;
 
   return (
-    <g onClick={isAttackable ? onClick : undefined} style={{ cursor: isAttackable ? "pointer" : "default" }}>
+    <g onClick={clickable ? onClick : undefined} style={{ cursor: clickable ? "pointer" : "default" }}>
       <polygon
         points={points}
         fill={fillColor}
@@ -247,8 +255,33 @@ export function HexTile({ hex, cx, cy, size, isOwn, isAttackable, isSelected, is
       />
       <TerrainDecor hexId={hex.id} cx={cx} cy={cy} size={size} owned={!!hex.ownerId} />
       {hex.ownerId && <PlayerShield cx={cx} cy={cy} size={size} />}
-      {isAttackable && (
+      {isAttackable && !isPlanning && (
         <polygon points={points} fill="none" stroke="#f0c030" strokeWidth={2} opacity={0.45} className="animate-pulse" />
+      )}
+      {/* Planning: pulsing border on attackable hexes */}
+      {isAttackable && isPlanning && !isSelected && (
+        <polygon points={points} fill="none" stroke="#f0c030" strokeWidth={2} opacity={0.5} className="animate-pulse" />
+      )}
+      {/* Planning: my selection glow */}
+      {isSelected && isPlanning && (
+        <polygon points={points} fill="rgba(34,211,238,0.12)" stroke="#22d3ee" strokeWidth={3.5} opacity={0.8} />
+      )}
+      {/* Planning: taken by another player marker */}
+      {planningSelection && (
+        <g style={{ pointerEvents: "none" }}>
+          <polygon points={points} fill={planningSelection.color} opacity={0.15} />
+          <text
+            x={cx}
+            y={cy + size * 0.45}
+            textAnchor="middle"
+            fontSize={size * 0.16}
+            fill={planningSelection.color}
+            fontWeight="bold"
+            opacity={0.9}
+          >
+            {planningSelection.username}
+          </text>
+        </g>
       )}
     </g>
   );

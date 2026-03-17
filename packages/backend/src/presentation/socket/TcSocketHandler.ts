@@ -2,10 +2,12 @@ import { Server, Socket } from "socket.io";
 import {
   TcEvents,
   TcMatchStatus,
+  TcCategory,
   TC_QUESTION_TIMEOUT_MS,
   TC_TIEBREAKER_TIMEOUT_MS,
   TC_MIN_PLAYERS_DEV,
   TC_START_COUNTDOWN_S,
+  TC_PLANNING_PHASE_MS,
 } from "@minigames/shared";
 import { ITcMatchRepository } from "../../domain/interfaces/ITcMatchRepository";
 import { ITcQuestionRepository } from "../../domain/interfaces/ITcQuestionRepository";
@@ -23,6 +25,9 @@ const MIN_PLAYERS = TC_MIN_PLAYERS_DEV;
 // Track match timers so we can clean them up
 const matchTimers = new Map<string, NodeJS.Timeout>();
 const startCountdowns = new Map<string, NodeJS.Timeout>();
+const planningTimers = new Map<string, NodeJS.Timeout>();
+// Track simultaneous duel completion callbacks: matchId → (duelId → callback)
+const simultaneousCallbacks = new Map<string, Map<string, () => void>>();
 
 // Cooldown after a match the player abandoned finishes (userId -> cooldownEndsAt)
 const abandonCooldowns = new Map<string, Date>();
@@ -37,12 +42,15 @@ export class TcSocketHandler {
   private submitTiebreaker: SubmitTiebreakerUseCase;
   private getMatchState: GetMatchStateUseCase;
 
+  private questionRepo: ITcQuestionRepository;
+
   constructor(
     private io: Server,
     private socket: Socket,
     private matchRepo: ITcMatchRepository,
     questionRepo: ITcQuestionRepository
   ) {
+    this.questionRepo = questionRepo;
     this.createMatch = new CreateMatchUseCase(matchRepo);
     this.joinMatch = new JoinMatchUseCase(matchRepo);
     this.autoMatchmake = new AutoMatchmakeUseCase(matchRepo, this.createMatch);
@@ -65,13 +73,19 @@ export class TcSocketHandler {
     this.socket.on(TcEvents.JOIN_MATCH, (data: { matchCode: string }) => this.handleJoinMatch(data.matchCode));
     this.socket.on(TcEvents.JOIN_MATCHMAKING, () => this.handleJoinMatchmaking());
     this.socket.on(TcEvents.LEAVE_MATCH, () => this.handleLeaveMatch());
-    this.socket.on(TcEvents.ATTACK, (data: { hexId: string }) => this.handleAttack(data.hexId));
+    this.socket.on(TcEvents.SELECT_HEX, (data: { hexId: string }) => this.handleSelectHex(data.hexId));
+    this.socket.on(TcEvents.DESELECT_HEX, () => this.handleDeselectHex());
+    this.socket.on(TcEvents.SUBMIT_ELIMINATION_ANSWER, (data: { numericAnswer: number }) => {
+      const matchId = this.socket.data.tcMatchId;
+      if (matchId) this.handleSubmitEliminationAnswer(matchId, this.userId, data.numericAnswer);
+    });
     this.socket.on(TcEvents.SUBMIT_ANSWER, (data: { duelId: string; questionIndex: number; selectedIndex: number }) =>
       this.handleSubmitAnswer(data.duelId, data.questionIndex, data.selectedIndex)
     );
     this.socket.on(TcEvents.SUBMIT_TIEBREAKER, (data: { duelId: string; numericAnswer: number }) =>
       this.handleSubmitTiebreaker(data.duelId, data.numericAnswer)
     );
+    this.socket.on(TcEvents.SURRENDER, () => this.handleSurrender());
     this.socket.on(TcEvents.ACCEPT_REVENGE, () => this.handleAcceptRevenge());
     this.socket.on(TcEvents.DECLINE_REVENGE, () => this.handleDeclineRevenge());
     this.socket.on(TcEvents.RECONNECT, () => this.handleReconnect());
@@ -81,12 +95,7 @@ export class TcSocketHandler {
 
   // ── Lobby ────────────────────────────────────────────────────────
 
-  /**
-   * Check if the player is blocked from joining/creating new matches.
-   * Returns an error message if blocked, or null if free.
-   */
   private getJoinBlockReason(): string | null {
-    // Check if player has an active match they left
     const activeMatch = this.matchRepo.findActiveByPlayerId(this.userId);
     if (activeMatch && activeMatch.status === TcMatchStatus.Playing) {
       const player = activeMatch.getPlayer(this.userId);
@@ -95,14 +104,12 @@ export class TcSocketHandler {
       }
     }
 
-    // Check abandon cooldown
     const cooldownEnd = abandonCooldowns.get(this.userId);
     if (cooldownEnd && new Date() < cooldownEnd) {
       const remaining = Math.ceil((cooldownEnd.getTime() - Date.now()) / 1000);
       return `Cooldown active: ${remaining}s remaining after leaving a match.`;
     }
 
-    // Clear expired cooldown
     if (cooldownEnd) {
       abandonCooldowns.delete(this.userId);
     }
@@ -184,7 +191,6 @@ export class TcSocketHandler {
     if (!match || match.status !== TcMatchStatus.Lobby) return;
     if (!match.canStart(MIN_PLAYERS)) return;
 
-    // Cancel any existing countdown
     if (startCountdowns.has(matchId)) return;
 
     const roomName = `tc:${matchId}`;
@@ -207,6 +213,11 @@ export class TcSocketHandler {
         this.handleMatchTimeout(matchId);
       }, m.matchDurationMs);
       matchTimers.set(matchId, matchEndTimer);
+
+      // Start first planning phase after a short delay
+      setTimeout(() => {
+        this.startPlanningPhase(matchId);
+      }, 1500);
     }, TC_START_COUNTDOWN_S * 1000);
 
     startCountdowns.set(matchId, timer);
@@ -215,6 +226,13 @@ export class TcSocketHandler {
   private handleMatchTimeout(matchId: string): void {
     const match = this.matchRepo.findById(matchId);
     if (!match || match.status === TcMatchStatus.Finished) return;
+
+    // Clean up planning timer
+    const planTimer = planningTimers.get(matchId);
+    if (planTimer) {
+      clearTimeout(planTimer);
+      planningTimers.delete(matchId);
+    }
 
     match.finish();
     const leaderboard = match.getLeaderboard();
@@ -230,11 +248,9 @@ export class TcSocketHandler {
     this.matchRepo.persistToDb(match);
     matchTimers.delete(matchId);
 
-    // Set abandon cooldown for disconnected players
     this.setAbandonCooldowns(match);
   }
 
-  /** Set cooldown for players who were disconnected when match ended */
   private setAbandonCooldowns(match: { players: Map<string, { userId: string; connected: boolean }> }): void {
     for (const player of match.players.values()) {
       if (!player.connected) {
@@ -243,30 +259,499 @@ export class TcSocketHandler {
     }
   }
 
-  // ── Attack & Duel ────────────────────────────────────────────────
+  // ── Elimination Round (too few hexes) ─────────────────────────────
 
-  private handleAttack(hexId: string): void {
+  /** Track elimination answers: matchId -> Map<userId, numericAnswer> */
+  private eliminationAnswers = new Map<string, Map<string, number>>();
+
+  private startEliminationRound(matchId: string, activePlayers: string[], availableSlots: number): void {
+    const match = this.matchRepo.findById(matchId);
+    if (!match || match.status !== TcMatchStatus.Playing) return;
+
+    const roomName = `tc:${matchId}`;
+    const categories = Object.values(TcCategory);
+    const randomCategory = categories[Math.floor(Math.random() * categories.length)];
+    const tiebreakerQ = this.questionRepo.findRandomTiebreaker(randomCategory);
+
+    // Store answers tracker
+    this.eliminationAnswers.set(matchId, new Map());
+
+    // Send elimination round to all active players
+    for (const userId of activePlayers) {
+      const playerSocket = this.findPlayerSocket(userId, matchId);
+      if (playerSocket) {
+        playerSocket.emit(TcEvents.ELIMINATION_ROUND, {
+          roundNumber: match.currentRound + 1,
+          text: tiebreakerQ.text,
+          timeoutMs: TC_TIEBREAKER_TIMEOUT_MS,
+          availableSlots,
+          totalPlayers: activePlayers.length,
+        });
+      }
+    }
+
+    // Store elimination data on match entity
+    match.eliminationData = { tiebreakerQ, activePlayers, availableSlots };
+
+    // Timeout handler
+    setTimeout(() => {
+      this.resolveEliminationRound(matchId);
+    }, TC_TIEBREAKER_TIMEOUT_MS + 1000);
+  }
+
+  private handleSubmitEliminationAnswer(matchId: string, userId: string, answer: number): void {
+    const answers = this.eliminationAnswers.get(matchId);
+    if (!answers) return;
+    answers.set(userId, answer);
+
+    const match = this.matchRepo.findById(matchId);
+    if (!match?.eliminationData) return;
+
+    // Check if all answered
+    if (answers.size >= match.eliminationData.activePlayers.length) {
+      this.resolveEliminationRound(matchId);
+    }
+  }
+
+  private resolveEliminationRound(matchId: string): void {
+    const match = this.matchRepo.findById(matchId);
+    if (!match || match.status !== TcMatchStatus.Playing || !match.eliminationData) return;
+
+    const answers = this.eliminationAnswers.get(matchId);
+    if (!answers) return;
+
+    const { tiebreakerQ, activePlayers, availableSlots } = match.eliminationData;
+
+    // Fill missing answers with worst possible
+    for (const userId of activePlayers) {
+      if (!answers.has(userId)) {
+        answers.set(userId, -999999);
+      }
+    }
+
+    // Rank by distance to correct answer (closest = best)
+    const ranked = activePlayers
+      .map(userId => ({
+        userId,
+        distance: tiebreakerQ.getDistance(answers.get(userId) ?? -999999),
+      }))
+      .sort((a, b) => a.distance - b.distance);
+
+    // Take the top N (availableSlots)
+    const qualified = ranked.slice(0, availableSlots).map(r => r.userId);
+    const eliminated = ranked.slice(availableSlots).map(r => r.userId);
+
+    const roomName = `tc:${matchId}`;
+    this.io.to(roomName).emit(TcEvents.ELIMINATION_RESULT, {
+      qualifiedUserIds: qualified,
+      eliminatedUserIds: eliminated,
+    });
+
+    // Clean up
+    this.eliminationAnswers.delete(matchId);
+    match.eliminationData = null;
+
+    // Start planning with only qualified players
+    setTimeout(() => {
+      this.startPlanningPhaseForPlayers(matchId, new Set(qualified));
+    }, 2000);
+  }
+
+  // ── Planning Phase ────────────────────────────────────────────────
+
+  private startPlanningPhase(matchId: string): void {
+    const match = this.matchRepo.findById(matchId);
+    if (!match || match.status !== TcMatchStatus.Playing) return;
+
+    // Check if there are neutral hexes remaining
+    if (!match.hasNeutralHexes()) {
+      // No neutral hexes → match ends
+      match.finish();
+      const leaderboard = match.getLeaderboard();
+      const roomName = `tc:${matchId}`;
+
+      const timer = matchTimers.get(matchId);
+      if (timer) {
+        clearTimeout(timer);
+        matchTimers.delete(matchId);
+      }
+
+      match.winnerId = leaderboard.length > 0 ? leaderboard[0].userId : null;
+      this.io.to(roomName).emit(TcEvents.MATCH_OVER, {
+        winnerId: match.winnerId,
+        reason: "domination",
+        leaderboard,
+      });
+
+      this.matchRepo.persistToDb(match);
+      this.setAbandonCooldowns(match);
+      return;
+    }
+
+    // Check if elimination round is needed
+    const elimCheck = match.needsEliminationRound();
+    if (elimCheck.needed) {
+      console.log(`[TC] Match ${match.code} - Elimination round: ${elimCheck.activePlayers.length} players, ${elimCheck.availableHexCount} hexes`);
+      this.startEliminationRound(
+        matchId,
+        elimCheck.activePlayers.map(p => p.userId),
+        elimCheck.availableHexCount
+      );
+      return;
+    }
+
+    this.startPlanningPhaseForPlayers(matchId, null);
+  }
+
+  private startPlanningPhaseForPlayers(matchId: string, qualifiedPlayers: Set<string> | null): void {
+    const match = this.matchRepo.findById(matchId);
+    if (!match || match.status !== TcMatchStatus.Playing) return;
+
+    match.startPlanningPhase(TC_PLANNING_PHASE_MS);
+    const roomName = `tc:${matchId}`;
+
+    // Send planning start with each player's attackable hexes
+    const activePlayers = match.getActivePlayers();
+    for (const player of activePlayers) {
+      const isQualified = qualifiedPlayers === null || qualifiedPlayers.has(player.userId);
+      const attackable = isQualified ? match.getAttackableHexIds(player.userId) : [];
+      const playerSocket = this.findPlayerSocket(player.userId, matchId);
+      if (playerSocket) {
+        playerSocket.emit(TcEvents.PLANNING_START, {
+          roundNumber: match.currentRound,
+          durationMs: TC_PLANNING_PHASE_MS,
+          attackableHexIds: attackable,
+        });
+      }
+    }
+
+    // Also notify spectating players (no territory, no revenge)
+    for (const player of match.players.values()) {
+      if (!activePlayers.some(ap => ap.userId === player.userId)) {
+        const playerSocket = this.findPlayerSocket(player.userId, matchId);
+        if (playerSocket) {
+          playerSocket.emit(TcEvents.PLANNING_START, {
+            roundNumber: match.currentRound,
+            durationMs: TC_PLANNING_PHASE_MS,
+            attackableHexIds: [],
+          });
+        }
+      }
+    }
+
+    console.log(`[TC] Match ${match.code} Round ${match.currentRound} - Planning phase started`);
+
+    // Set planning timer
+    const planTimer = setTimeout(() => {
+      planningTimers.delete(matchId);
+      this.endPlanningPhase(matchId);
+    }, TC_PLANNING_PHASE_MS + 500); // small grace
+
+    planningTimers.set(matchId, planTimer);
+  }
+
+  private handleSelectHex(hexId: string): void {
     try {
       const matchId = this.socket.data.tcMatchId;
       if (!matchId) throw new Error("Not in a match");
 
-      const duel = this.attackTerritory.execute(matchId, this.userId, hexId);
-      const match = this.matchRepo.findById(matchId)!;
-      const targetHex = match.hexagons.get(hexId)!;
+      const match = this.matchRepo.findById(matchId);
+      if (!match) throw new Error("Match not found");
 
+      const result = match.selectHex(this.userId, hexId);
+      if (!result.ok) throw new Error(result.reason);
+
+      const player = match.getPlayer(this.userId)!;
       const roomName = `tc:${matchId}`;
 
-      // Notify attacker
-      this.socket.emit(TcEvents.DUEL_STARTED, {
-        duelId: duel.id,
+      // Broadcast selection to all players
+      this.io.to(roomName).emit(TcEvents.HEX_SELECTED, {
         hexId,
-        category: duel.category,
-        opponentUsername: duel.defenderId
-          ? match.getPlayer(duel.defenderId)?.username ?? null
-          : null,
-        isNeutral: duel.isNeutral,
-        isAttacker: true,
+        userId: this.userId,
+        username: player.username,
+        color: player.color,
       });
+
+      // Check if all active players have selected → end planning early
+      const activePlayers = match.getActivePlayers();
+      const allSelected = activePlayers.every(p => match.hexSelections.has(p.userId));
+      if (allSelected) {
+        // Cancel planning timer and resolve immediately
+        const planTimer = planningTimers.get(matchId);
+        if (planTimer) {
+          clearTimeout(planTimer);
+          planningTimers.delete(matchId);
+        }
+        // Small delay so the last selection is visible
+        setTimeout(() => this.endPlanningPhase(matchId), 500);
+      }
+    } catch (error) {
+      this.emitError(error);
+    }
+  }
+
+  private handleDeselectHex(): void {
+    try {
+      const matchId = this.socket.data.tcMatchId;
+      if (!matchId) throw new Error("Not in a match");
+
+      const match = this.matchRepo.findById(matchId);
+      if (!match) throw new Error("Match not found");
+
+      const hexId = match.deselectHex(this.userId);
+      if (hexId) {
+        const roomName = `tc:${matchId}`;
+        this.io.to(roomName).emit(TcEvents.HEX_DESELECTED, {
+          hexId,
+          userId: this.userId,
+        });
+      }
+    } catch (error) {
+      this.emitError(error);
+    }
+  }
+
+  private endPlanningPhase(matchId: string): void {
+    const match = this.matchRepo.findById(matchId);
+    if (!match || match.status !== TcMatchStatus.Playing) return;
+    if (match.roundPhase !== "planning") return;
+
+    const roomName = `tc:${matchId}`;
+
+    // Auto-assign random hex for players who didn't select
+    const autoAssigned = match.autoAssignUnselectedPlayers();
+    for (const { userId, hexId } of autoAssigned) {
+      const player = match.getPlayer(userId);
+      if (player) {
+        this.io.to(roomName).emit(TcEvents.HEX_SELECTED, {
+          hexId,
+          userId,
+          username: player.username,
+          color: player.color,
+        });
+      }
+    }
+
+    this.io.to(roomName).emit(TcEvents.PLANNING_END, {});
+
+    // Build resolution order
+    const order = match.buildResolutionOrder();
+
+    if (order.length === 0) {
+      // No one selected → skip resolution, start next planning
+      match.endRound();
+      setTimeout(() => this.startPlanningPhase(matchId), 2000);
+      return;
+    }
+
+    console.log(`[TC] Match ${match.code} Round ${match.currentRound} - Resolution phase: ${order.length} attacks (${autoAssigned.length} auto-assigned)`);
+
+    this.io.to(roomName).emit(TcEvents.RESOLUTION_START, {
+      roundNumber: match.currentRound,
+      order,
+    });
+
+    // All duels are against neutral hexes during this phase → resolve simultaneously
+    this.resolveAllDuelsSimultaneously(matchId);
+  }
+
+  // ── Simultaneous Resolution (all duels at once for neutral hexes) ──
+
+  private resolveAllDuelsSimultaneously(matchId: string): void {
+    const match = this.matchRepo.findById(matchId);
+    if (!match || match.status !== TcMatchStatus.Playing) return;
+
+    const order = match.roundOrder;
+    if (order.length === 0) return;
+
+    let duelsStarted = 0;
+    let duelsResolved = 0;
+    const totalDuels = order.length;
+
+    // Track pending duels for this round to know when all are done
+    const pendingDuelIds = new Set<string>();
+
+    // Store the original resolveDuel callback so we can hook into it
+    const onDuelDone = () => {
+      duelsResolved++;
+      if (duelsResolved >= totalDuels) {
+        // All duels resolved → end round, check win, start next planning
+        this.finishSimultaneousRound(matchId);
+      }
+    };
+
+    // Store callback on match for this round
+    if (!simultaneousCallbacks.has(matchId)) {
+      simultaneousCallbacks.set(matchId, new Map());
+    }
+
+    for (let i = 0; i < order.length; i++) {
+      const entry = order[i];
+      const targetHex = match.hexagons.get(entry.targetHexId);
+
+      if (!targetHex || targetHex.isOwnedBy(entry.userId)) {
+        duelsResolved++;
+        continue;
+      }
+
+      try {
+        const duel = this.attackTerritory.execute(matchId, entry.userId, entry.targetHexId);
+        pendingDuelIds.add(duel.id);
+        simultaneousCallbacks.get(matchId)!.set(duel.id, onDuelDone);
+
+        // Notify attacker
+        const attackerSocket = this.findPlayerSocket(entry.userId, matchId);
+        if (attackerSocket) {
+          attackerSocket.emit(TcEvents.DUEL_STARTED, {
+            duelId: duel.id,
+            hexId: entry.targetHexId,
+            category: duel.category,
+            opponentUsername: null,
+            isNeutral: true,
+            isAttacker: true,
+          });
+        }
+
+        // Send first question
+        this.sendDuelQuestion(duel);
+        duelsStarted++;
+      } catch (error) {
+        console.error(`[TC] Simultaneous duel failed for ${entry.username}:`, error);
+        duelsResolved++;
+      }
+    }
+
+    // If all duels were skipped/failed, finish immediately
+    if (duelsResolved >= totalDuels) {
+      this.finishSimultaneousRound(matchId);
+    }
+  }
+
+  private finishSimultaneousRound(matchId: string): void {
+    const match = this.matchRepo.findById(matchId);
+    if (!match || match.status !== TcMatchStatus.Playing) return;
+
+    // Clean up callbacks
+    simultaneousCallbacks.delete(matchId);
+
+    match.endRound();
+    const roomName = `tc:${matchId}`;
+
+    // Send leaderboard
+    this.io.to(roomName).emit(TcEvents.LEADERBOARD_UPDATE, match.getLeaderboard());
+
+    // Check win condition
+    const winner = match.checkWinCondition();
+    if (winner) {
+      const timer = matchTimers.get(matchId);
+      if (timer) { clearTimeout(timer); matchTimers.delete(matchId); }
+      match.finish();
+      this.io.to(roomName).emit(TcEvents.MATCH_OVER, {
+        winnerId: winner,
+        reason: "domination",
+        leaderboard: match.getLeaderboard(),
+      });
+      this.matchRepo.persistToDb(match);
+      this.setAbandonCooldowns(match);
+      return;
+    }
+
+    // Start next planning phase
+    setTimeout(() => this.startPlanningPhase(matchId), 2000);
+  }
+
+  // ── Resolution Phase (Sequential Duels) ───────────────────────────
+
+  private processNextDuel(matchId: string): void {
+    const match = this.matchRepo.findById(matchId);
+    if (!match || match.status !== TcMatchStatus.Playing) return;
+    if (match.roundPhase !== "resolution") return;
+
+    const pos = match.currentDuelPosition;
+    if (pos >= match.roundOrder.length) {
+      // All duels resolved → end round, start next planning
+      match.endRound();
+
+      // Send leaderboard
+      const roomName = `tc:${matchId}`;
+      this.io.to(roomName).emit(TcEvents.LEADERBOARD_UPDATE, match.getLeaderboard());
+
+      // Check win condition
+      const winner = match.checkWinCondition();
+      if (winner) {
+        const timer = matchTimers.get(matchId);
+        if (timer) {
+          clearTimeout(timer);
+          matchTimers.delete(matchId);
+        }
+        match.finish();
+        this.io.to(roomName).emit(TcEvents.MATCH_OVER, {
+          winnerId: winner,
+          reason: "domination",
+          leaderboard: match.getLeaderboard(),
+        });
+        this.matchRepo.persistToDb(match);
+        this.setAbandonCooldowns(match);
+        return;
+      }
+
+      // Start next planning phase
+      setTimeout(() => this.startPlanningPhase(matchId), 2000);
+      return;
+    }
+
+    const entry = match.roundOrder[pos];
+    const roomName = `tc:${matchId}`;
+    const targetHex = match.hexagons.get(entry.targetHexId);
+
+    if (!targetHex) {
+      // Invalid hex, skip
+      match.currentDuelPosition++;
+      this.processNextDuel(matchId);
+      return;
+    }
+
+    // Check if the target hex is now owned by the attacker (from a previous duel this round)
+    if (targetHex.isOwnedBy(entry.userId)) {
+      match.currentDuelPosition++;
+      this.processNextDuel(matchId);
+      return;
+    }
+
+    // Determine if still neutral or has a new owner
+    const isNeutral = targetHex.isNeutral();
+    const defenderUsername = isNeutral ? null : (targetHex.ownerUsername ?? null);
+
+    // Broadcast which duel is being processed
+    this.io.to(roomName).emit(TcEvents.CURRENT_DUEL_INFO, {
+      position: pos,
+      total: match.roundOrder.length,
+      attackerUserId: entry.userId,
+      attackerUsername: entry.username,
+      attackerColor: entry.color,
+      targetHexId: entry.targetHexId,
+      defenderUsername,
+      isNeutral,
+    });
+
+    // Start the duel using existing attack machinery
+    try {
+      const duel = this.attackTerritory.execute(matchId, entry.userId, entry.targetHexId);
+
+      // Notify attacker
+      const attackerSocket = this.findPlayerSocket(entry.userId, matchId);
+      if (attackerSocket) {
+        attackerSocket.emit(TcEvents.DUEL_STARTED, {
+          duelId: duel.id,
+          hexId: entry.targetHexId,
+          category: duel.category,
+          opponentUsername: duel.defenderId
+            ? match.getPlayer(duel.defenderId)?.username ?? null
+            : null,
+          isNeutral: duel.isNeutral,
+          isAttacker: true,
+        });
+      }
 
       // Notify defender if PvP
       if (duel.defenderId) {
@@ -276,9 +761,9 @@ export class TcSocketHandler {
         if (defender?.connected && defenderSocket) {
           defenderSocket.emit(TcEvents.DUEL_STARTED, {
             duelId: duel.id,
-            hexId,
+            hexId: entry.targetHexId,
             category: duel.category,
-            opponentUsername: this.username,
+            opponentUsername: entry.username,
             isNeutral: false,
             isAttacker: false,
           });
@@ -296,9 +781,14 @@ export class TcSocketHandler {
         }
       }
     } catch (error) {
-      this.emitError(error);
+      // Attack failed (e.g., not enough questions, attacker has no territory left)
+      console.error(`[TC] Duel failed for round ${match.currentRound} pos ${pos}:`, error);
+      match.currentDuelPosition++;
+      setTimeout(() => this.processNextDuel(matchId), 500);
     }
   }
+
+  // ── Duel Flow (unchanged core mechanics) ─────────────────────────
 
   private handleSubmitAnswer(duelId: string, questionIndex: number, selectedIndex: number): void {
     try {
@@ -311,7 +801,7 @@ export class TcSocketHandler {
       const duel = match.activeDuels.get(duelId);
       if (!duel) throw new Error("Duel not found");
 
-      const { answer } = this.submitDuelAnswer.execute(duel, this.userId, questionIndex, selectedIndex);
+      this.submitDuelAnswer.execute(duel, this.userId, questionIndex, selectedIndex);
 
       // Notify opponent that we answered
       if (duel.defenderId && this.userId === duel.attackerId) {
@@ -326,7 +816,6 @@ export class TcSocketHandler {
         }
       }
 
-      // Check if both answered
       if (duel.bothAnsweredCurrentQuestion()) {
         this.handleBothAnswered(duel, match);
       }
@@ -341,7 +830,6 @@ export class TcSocketHandler {
     const attackerAnswer = duel.attackerAnswers.find((a) => a.questionIndex === duel.currentQuestionIndex);
     const defenderAnswer = duel.defenderAnswers.find((a) => a.questionIndex === duel.currentQuestionIndex);
 
-    // Send question result to both players
     const attackerSocket = this.findPlayerSocket(duel.attackerId, matchId);
     const defenderSocket = duel.defenderId ? this.findPlayerSocket(duel.defenderId, matchId) : null;
 
@@ -367,7 +855,6 @@ export class TcSocketHandler {
       });
     }
 
-    // Advance question
     const next = duel.advanceQuestion();
 
     setTimeout(() => {
@@ -378,7 +865,7 @@ export class TcSocketHandler {
       } else {
         this.resolveDuel(duel, matchId);
       }
-    }, 2000); // 2s delay between questions
+    }, 2000);
   }
 
   private sendDuelQuestion(duel: TcDuel): void {
@@ -407,18 +894,16 @@ export class TcSocketHandler {
         const defenderSocket = this.findPlayerSocket(duel.defenderId, matchId);
         if (defenderSocket) defenderSocket.emit(TcEvents.DUEL_QUESTION, payload);
       } else {
-        // CPU answers for disconnected defender
         this.startCpuDefense(duel, matchId);
       }
     }
 
-    // Auto-timeout after question timeout
+    // Auto-timeout
     const questionIdx = duel.currentQuestionIndex;
     setTimeout(() => {
-      if (duel.currentQuestionIndex !== questionIdx) return; // already advanced
+      if (duel.currentQuestionIndex !== questionIdx) return;
       if (duel.bothAnsweredCurrentQuestion()) return;
 
-      // Auto-timeout unanswered players
       if (!duel.attackerAnswers.some((a) => a.questionIndex === questionIdx)) {
         duel.autoTimeoutPlayer(duel.attackerId);
       }
@@ -433,7 +918,7 @@ export class TcSocketHandler {
       if (match && duel.bothAnsweredCurrentQuestion()) {
         this.handleBothAnswered(duel, match);
       }
-    }, TC_QUESTION_TIMEOUT_MS + 1000); // +1s grace
+    }, TC_QUESTION_TIMEOUT_MS + 1000);
   }
 
   private sendTiebreaker(duel: TcDuel, matchId: string): void {
@@ -454,12 +939,10 @@ export class TcSocketHandler {
         const defenderSocket = this.findPlayerSocket(duel.defenderId, matchId);
         if (defenderSocket) defenderSocket.emit(TcEvents.DUEL_TIEBREAKER, payload);
       } else if (duel.tiebreakerQuestion) {
-        // CPU answers tiebreaker for disconnected defender
         const cpuDelay = 2000 + Math.floor(Math.random() * 3000);
         setTimeout(() => {
           if (duel.defenderTiebreakerAnswer !== null) return;
           const correct = duel.tiebreakerQuestion!.numericAnswer;
-          // CPU guesses with 20-50% error
           const error = correct * (0.2 + Math.random() * 0.3) * (Math.random() < 0.5 ? 1 : -1);
           duel.submitTiebreakerAnswer(duel.defenderId!, Math.round(correct + error));
           if (duel.bothAnsweredTiebreaker()) {
@@ -470,7 +953,7 @@ export class TcSocketHandler {
       }
     }
 
-    // Auto-timeout for tiebreaker
+    // Auto-timeout
     setTimeout(() => {
       if (duel.bothAnsweredTiebreaker()) return;
 
@@ -517,7 +1000,7 @@ export class TcSocketHandler {
     const result = match.resolveDuel(duel);
     const roomName = `tc:${matchId}`;
 
-    // Notify all players about territory change
+    // Notify all players about duel result
     const resolvedPayload = {
       duelId: duel.id,
       winnerId: duel.winnerId,
@@ -529,7 +1012,7 @@ export class TcSocketHandler {
 
     this.io.to(roomName).emit(TcEvents.DUEL_RESOLVED, resolvedPayload);
 
-    // If territory changed, send map update to all
+    // If territory changed, send map update
     if (result.hexChanged) {
       const hex = match.hexagons.get(duel.hexId);
       if (hex) {
@@ -560,7 +1043,7 @@ export class TcSocketHandler {
     // Send leaderboard update
     this.io.to(roomName).emit(TcEvents.LEADERBOARD_UPDATE, match.getLeaderboard());
 
-    // Check win condition
+    // Check win condition immediately
     const winner = match.checkWinCondition();
     if (winner) {
       const timer = matchTimers.get(matchId);
@@ -578,12 +1061,28 @@ export class TcSocketHandler {
 
       this.matchRepo.persistToDb(match);
       this.setAbandonCooldowns(match);
+      return;
     }
+
+    // Check if this duel is part of a simultaneous round
+    const simCallbacks = simultaneousCallbacks.get(matchId);
+    if (simCallbacks && simCallbacks.has(duel.id)) {
+      const cb = simCallbacks.get(duel.id)!;
+      simCallbacks.delete(duel.id);
+      cb();
+      return;
+    }
+
+    // Move to next duel in resolution after a delay (sequential mode)
+    match.currentDuelPosition++;
+    setTimeout(() => this.processNextDuel(matchId), 3000);
   }
 
   // ── Revenge ──────────────────────────────────────────────────────
 
   private handleAcceptRevenge(): void {
+    // In the new phase system, revenge is handled by selecting the revenge hex during planning
+    // This handler is kept for compatibility but the main flow uses selectHex
     try {
       const matchId = this.socket.data.tcMatchId;
       if (!matchId) throw new Error("Not in a match");
@@ -595,8 +1094,10 @@ export class TcSocketHandler {
       if (!player) throw new Error("Not in this match");
       if (!player.hasRevenge()) throw new Error("No revenge available");
 
-      // Attack the revenge target hex
-      this.handleAttack(player.revengeTargetHexId!);
+      // Auto-select the revenge hex during planning
+      if (match.roundPhase === "planning") {
+        this.handleSelectHex(player.revengeTargetHexId!);
+      }
     } catch (error) {
       this.emitError(error);
     }
@@ -613,10 +1114,98 @@ export class TcSocketHandler {
       const player = match.getPlayer(this.userId);
       if (!player) throw new Error("Not in this match");
 
-      player.setCooldown(360000); // 6 min cooldown
+      player.setCooldown(360000);
       this.socket.emit(TcEvents.REVENGE_COOLDOWN, {
         cooldownEndsAt: player.revengeCooldownUntil?.toISOString() ?? "",
       });
+    } catch (error) {
+      this.emitError(error);
+    }
+  }
+
+  // ── Surrender ──────────────────────────────────────────────────────
+
+  private handleSurrender(): void {
+    try {
+      console.log(`[TC] ${this.username} attempting surrender`);
+      const matchId = this.socket.data.tcMatchId;
+      if (!matchId) throw new Error("Not in a match");
+
+      const match = this.matchRepo.findById(matchId);
+      if (!match) throw new Error("Match not found");
+      if (match.status !== TcMatchStatus.Playing) throw new Error("Match not in progress");
+
+      const player = match.getPlayer(this.userId);
+      if (!player) throw new Error("Not in this match");
+
+      // Forfeit any active duel first
+      const activeDuel = match.findActiveDuelByPlayer(this.userId);
+      if (activeDuel) {
+        this.forfeitDuelForPlayer(activeDuel, this.userId, matchId);
+      }
+
+      // Deselect hex if in planning
+      if (match.roundPhase === "planning") {
+        const hexId = match.deselectHex(this.userId);
+        if (hexId) {
+          const roomName = `tc:${matchId}`;
+          this.io.to(roomName).emit(TcEvents.HEX_DESELECTED, { hexId, userId: this.userId });
+        }
+      }
+
+      // Surrender: release all territories
+      const freedHexIds = match.surrenderPlayer(this.userId);
+      console.log(`[TC] ${this.username} surrendered, freed ${freedHexIds.length} hexes`);
+      const roomName = `tc:${matchId}`;
+
+      // Notify everyone about surrender
+      this.io.to(roomName).emit(TcEvents.PLAYER_SURRENDERED, {
+        userId: this.userId,
+        username: player.username,
+        freedHexIds,
+      });
+
+      // Send map updates for all freed hexes
+      if (freedHexIds.length > 0) {
+        const updates = freedHexIds.map(hexId => {
+          const hex = match.hexagons.get(hexId)!;
+          return {
+            hexId: hex.id,
+            ownerId: hex.ownerId,
+            ownerUsername: hex.ownerUsername,
+            ownerColor: hex.ownerColor,
+          };
+        });
+        this.io.to(roomName).emit(TcEvents.MAP_UPDATE, updates);
+      }
+
+      // Send updated leaderboard
+      this.io.to(roomName).emit(TcEvents.LEADERBOARD_UPDATE, match.getLeaderboard());
+
+      // Check if only one player with territory remains → they win
+      const lastPlayer = match.getLastPlayerWithTerritory();
+      if (lastPlayer) {
+        const timer = matchTimers.get(matchId);
+        if (timer) {
+          clearTimeout(timer);
+          matchTimers.delete(matchId);
+        }
+        const planTimer = planningTimers.get(matchId);
+        if (planTimer) {
+          clearTimeout(planTimer);
+          planningTimers.delete(matchId);
+        }
+
+        match.winnerId = lastPlayer;
+        match.finish();
+        this.io.to(roomName).emit(TcEvents.MATCH_OVER, {
+          winnerId: lastPlayer,
+          reason: "domination",
+          leaderboard: match.getLeaderboard(),
+        });
+        this.matchRepo.persistToDb(match);
+        this.setAbandonCooldowns(match);
+      }
     } catch (error) {
       this.emitError(error);
     }
@@ -639,7 +1228,6 @@ export class TcSocketHandler {
           playerCount: match.players.size,
         });
 
-        // Cancel start if below min
         if (match.status === TcMatchStatus.Starting && match.players.size < MIN_PLAYERS) {
           match.status = TcMatchStatus.Lobby;
           const countdown = startCountdowns.get(matchId);
@@ -653,10 +1241,20 @@ export class TcSocketHandler {
           this.matchRepo.remove(matchId);
         }
       } else {
-        // During play, mark as disconnected but don't remove
         const player = match.getPlayer(this.userId);
         if (player) {
           player.connected = false;
+
+          // Deselect hex if in planning
+          if (match.roundPhase === "planning") {
+            const hexId = match.deselectHex(this.userId);
+            if (hexId) {
+              this.io.to(roomName).emit(TcEvents.HEX_DESELECTED, {
+                hexId,
+                userId: this.userId,
+              });
+            }
+          }
 
           // Forfeit any active duel
           const activeDuel = match.findActiveDuelByPlayer(this.userId);
@@ -688,7 +1286,17 @@ export class TcSocketHandler {
     player.connected = false;
     const roomName = `tc:${matchId}`;
 
-    // If player was in an active duel, forfeit it
+    // Deselect hex if in planning
+    if (match.roundPhase === "planning") {
+      const hexId = match.deselectHex(this.userId);
+      if (hexId) {
+        this.io.to(roomName).emit(TcEvents.HEX_DESELECTED, {
+          hexId,
+          userId: this.userId,
+        });
+      }
+    }
+
     if (match.status === TcMatchStatus.Playing) {
       const activeDuel = match.findActiveDuelByPlayer(this.userId);
       if (activeDuel) {
@@ -702,7 +1310,6 @@ export class TcSocketHandler {
     });
   }
 
-  /** Forfeit a duel for a disconnected player and notify the opponent */
   private forfeitDuelForPlayer(duel: TcDuel, disconnectedUserId: string, matchId: string): void {
     duel.forfeit(disconnectedUserId);
     const match = this.matchRepo.findById(matchId);
@@ -711,7 +1318,6 @@ export class TcSocketHandler {
     const disconnectedPlayer = match.getPlayer(disconnectedUserId);
     const opponentId = disconnectedUserId === duel.attackerId ? duel.defenderId : duel.attackerId;
 
-    // Notify opponent about disconnect win
     if (opponentId) {
       const opponentSocket = this.findPlayerSocket(opponentId, matchId);
       if (opponentSocket) {
@@ -723,7 +1329,6 @@ export class TcSocketHandler {
       }
     }
 
-    // Resolve the duel normally (territory transfer, leaderboard, etc.)
     this.resolveDuel(duel, matchId);
   }
 
@@ -731,7 +1336,17 @@ export class TcSocketHandler {
 
   private handleCheckActive(): void {
     const activeMatch = this.matchRepo.findActiveByPlayerId(this.userId);
-    const hasActive = !!(activeMatch && activeMatch.status === TcMatchStatus.Playing);
+    let hasActive = !!(activeMatch && activeMatch.status === TcMatchStatus.Playing);
+
+    // Don't show rejoin for surrendered players (0 territories, no revenge)
+    if (hasActive && activeMatch) {
+      const player = activeMatch.getPlayer(this.userId);
+      const territories = activeMatch.getPlayerTerritoryCount(this.userId);
+      if (territories === 0 && (!player || !player.hasRevenge())) {
+        hasActive = false;
+      }
+    }
+
     const matchCode = hasActive ? activeMatch!.code : null;
     this.socket.emit(TcEvents.ACTIVE_MATCH_STATUS, { hasActiveMatch: hasActive, matchCode });
   }
@@ -740,7 +1355,6 @@ export class TcSocketHandler {
 
   private handleReconnect(): void {
     try {
-      // Find a match where this player exists and is disconnected
       const match = this.matchRepo.findActiveByPlayerId(this.userId);
       if (!match) throw new Error("No active match found");
       if (match.status === TcMatchStatus.Finished) throw new Error("Match already finished");
@@ -748,13 +1362,11 @@ export class TcSocketHandler {
       const player = match.getPlayer(this.userId);
       if (!player) throw new Error("Not in this match");
 
-      // Only allow reconnect if player still has territories
       const territories = match.getPlayerTerritoryCount(this.userId);
       if (territories === 0 && !player.hasRevenge()) {
         throw new Error("No territories left. Cannot reconnect.");
       }
 
-      // Reconnect
       player.connected = true;
       const roomName = `tc:${match.id}`;
       this.socket.join(roomName);
@@ -762,7 +1374,6 @@ export class TcSocketHandler {
 
       console.log(`[TC] ${this.username} reconnected to match ${match.code}`);
 
-      // Send full state to reconnected player
       this.socket.emit(TcEvents.RECONNECTED, {
         matchId: match.id,
         matchCode: match.code,
@@ -770,9 +1381,14 @@ export class TcSocketHandler {
         players: match.getPlayersData(),
         matchTimerEndsAt: match.endsAt?.toISOString() ?? "",
         leaderboard: match.getLeaderboard(),
+        roundNumber: match.currentRound,
+        roundPhase: match.roundPhase,
+        planningEndsAt: match.planningEndsAt?.toISOString() ?? null,
+        selections: match.getSelectionsData(),
+        roundOrder: match.roundOrder,
+        currentDuelPosition: match.currentDuelPosition,
       });
 
-      // Notify others that player is back
       this.io.to(roomName).emit(TcEvents.PLAYER_JOINED, {
         userId: this.userId,
         username: this.username,
@@ -788,8 +1404,6 @@ export class TcSocketHandler {
   // ── CPU Defense for Disconnected Players ───────────────────────
 
   private startCpuDefense(duel: TcDuel, matchId: string): void {
-    // CPU auto-answers for the disconnected defender with random answers
-    // Slight delay to simulate "thinking"
     const answerForCpu = () => {
       const match = this.matchRepo.findById(matchId);
       if (!match || duel.isResolved()) return;
@@ -797,27 +1411,23 @@ export class TcSocketHandler {
       const question = duel.getCurrentQuestion();
       if (!question || !duel.defenderId) return;
 
-      // Check if defender already answered (might have reconnected)
       const alreadyAnswered = duel.defenderAnswers.some(
         (a) => a.questionIndex === duel.currentQuestionIndex
       );
       if (alreadyAnswered) return;
 
-      // Check if defender reconnected
       const defender = match.getPlayer(duel.defenderId);
       if (defender?.connected) return;
 
-      // CPU picks a random answer with 40% chance of being correct
       const isCorrect = Math.random() < 0.4;
       const selectedIndex = isCorrect
         ? question.correctIndex
         : [0, 1, 2, 3].filter((i) => i !== question.correctIndex)[Math.floor(Math.random() * 3)];
-      const timeMs = 3000 + Math.floor(Math.random() * 4000); // 3-7s response time
+      const timeMs = 3000 + Math.floor(Math.random() * 4000);
 
       try {
         duel.submitAnswer(duel.defenderId, selectedIndex, timeMs);
 
-        // Notify attacker that "opponent" answered
         const attackerSocket = this.findPlayerSocket(duel.attackerId, matchId);
         if (attackerSocket) {
           attackerSocket.emit(TcEvents.OPPONENT_ANSWERED, {
@@ -834,7 +1444,6 @@ export class TcSocketHandler {
       }
     };
 
-    // Delay CPU answer by 2-5 seconds
     const delay = 2000 + Math.floor(Math.random() * 3000);
     setTimeout(answerForCpu, delay);
   }

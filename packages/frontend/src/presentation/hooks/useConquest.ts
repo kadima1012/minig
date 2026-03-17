@@ -1,4 +1,5 @@
 import { useReducer, useEffect, useRef, useCallback } from "react";
+import { useAuth } from "./useAuth";
 import {
   TcHexData,
   TcPlayerData,
@@ -9,6 +10,12 @@ import {
   TcDuelResolved,
   TcMatchOver,
   TcMapUpdateEntry,
+  TcRoundOrderEntry,
+  TcHexSelectedData,
+  TcCurrentDuelInfo,
+  TcEliminationRoundData,
+  TcEliminationResultData,
+  TcPlayerSurrendered,
 } from "@minigames/shared";
 import { ConquestMultiplayerUseCase } from "../../application/use-cases/conquest/ConquestMultiplayerUseCase";
 import { disconnectSocket } from "../../infrastructure/socket/socketClient";
@@ -20,6 +27,8 @@ export type ConquestPhase =
   | "waiting"
   | "starting"
   | "playing"
+  | "planning"
+  | "resolution"
   | "duel"
   | "duel-result"
   | "tiebreaker"
@@ -59,6 +68,19 @@ export interface ConquestState {
   error: string | null;
   maxPlayers: number;
   hasActiveMatch: boolean;
+  // ── Round / Planning state ──────────────────────────────────────
+  roundNumber: number;
+  planningEndsAt: string | null;
+  attackableHexIds: string[];
+  /** hexId -> { userId, username, color } */
+  hexSelections: TcHexSelectedData[];
+  mySelectedHexId: string | null;
+  roundOrder: TcRoundOrderEntry[];
+  currentDuelInfo: TcCurrentDuelInfo | null;
+  eliminationRound: TcEliminationRoundData | null;
+  eliminationResult: TcEliminationResultData | null;
+  hasSurrendered: boolean;
+  surrenderMessage: string | null;
 }
 
 const initialState: ConquestState = {
@@ -79,6 +101,17 @@ const initialState: ConquestState = {
   error: null,
   maxPlayers: 20,
   hasActiveMatch: false,
+  roundNumber: 0,
+  planningEndsAt: null,
+  attackableHexIds: [],
+  hexSelections: [],
+  mySelectedHexId: null,
+  roundOrder: [],
+  currentDuelInfo: null,
+  eliminationRound: null,
+  eliminationResult: null,
+  hasSurrendered: false,
+  surrenderMessage: null,
 };
 
 // ── Actions ───────────────────────────────────────────────────────
@@ -90,6 +123,19 @@ type ConquestAction =
   | { type: "MATCH_STARTING"; countdown: number }
   | { type: "MATCH_STARTED"; hexes: TcHexData[]; players: TcPlayerData[]; matchTimerEndsAt: string; matchId: string; matchCode: string }
   | { type: "MAP_UPDATE"; updates: TcMapUpdateEntry[] }
+  // ── Planning / Resolution ───────────────────────────────────────
+  | { type: "PLANNING_START"; roundNumber: number; durationMs: number; attackableHexIds: string[] }
+  | { type: "HEX_SELECTED"; data: TcHexSelectedData }
+  | { type: "HEX_DESELECTED"; hexId: string; userId: string }
+  | { type: "MY_HEX_SELECTED"; hexId: string }
+  | { type: "MY_HEX_DESELECTED" }
+  | { type: "PLANNING_END" }
+  | { type: "RESOLUTION_START"; roundNumber: number; order: TcRoundOrderEntry[] }
+  | { type: "CURRENT_DUEL_INFO"; info: TcCurrentDuelInfo }
+  | { type: "ELIMINATION_ROUND"; data: TcEliminationRoundData }
+  | { type: "ELIMINATION_RESULT"; data: TcEliminationResultData }
+  | { type: "PLAYER_SURRENDERED"; data: TcPlayerSurrendered; isMe: boolean }
+  // ── Duel ────────────────────────────────────────────────────────
   | { type: "DUEL_STARTED"; duelId: string; hexId: string; category: string; opponentUsername: string | null; isNeutral: boolean; isAttacker: boolean }
   | { type: "DUEL_QUESTION"; question: TcDuelQuestionData }
   | { type: "OPPONENT_ANSWERED" }
@@ -105,7 +151,7 @@ type ConquestAction =
   | { type: "DISMISS_DUEL" }
   | { type: "ACTIVE_MATCH_STATUS"; hasActiveMatch: boolean }
   | { type: "OPPONENT_DISCONNECTED"; message: string }
-  | { type: "RECONNECTED"; hexes: TcHexData[]; players: TcPlayerData[]; matchTimerEndsAt: string; matchId: string; matchCode: string; leaderboard: TcLeaderboardEntry[] }
+  | { type: "RECONNECTED"; hexes: TcHexData[]; players: TcPlayerData[]; matchTimerEndsAt: string; matchId: string; matchCode: string; leaderboard: TcLeaderboardEntry[]; roundNumber: number; roundPhase: string; planningEndsAt: string | null; selections: TcHexSelectedData[]; roundOrder: TcRoundOrderEntry[]; currentDuelPosition: number }
   | { type: "ERROR"; message: string }
   | { type: "CLEAR_ERROR" }
   | { type: "RESET" };
@@ -180,6 +226,100 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
       return { ...state, hexes: updatedHexes };
     }
 
+    // ── Planning / Resolution ─────────────────────────────────────
+
+    case "PLANNING_START":
+      return {
+        ...state,
+        phase: "planning",
+        roundNumber: action.roundNumber,
+        planningEndsAt: new Date(Date.now() + action.durationMs).toISOString(),
+        attackableHexIds: action.attackableHexIds,
+        hexSelections: [],
+        mySelectedHexId: null,
+        roundOrder: [],
+        currentDuelInfo: null,
+        duel: null,
+        tiebreaker: null,
+        eliminationRound: null,
+        eliminationResult: null,
+      };
+
+    case "HEX_SELECTED":
+      return {
+        ...state,
+        hexSelections: [
+          ...state.hexSelections.filter((s) => s.userId !== action.data.userId && s.hexId !== action.data.hexId),
+          action.data,
+        ],
+      };
+
+    case "HEX_DESELECTED":
+      return {
+        ...state,
+        hexSelections: state.hexSelections.filter((s) => s.userId !== action.userId),
+      };
+
+    case "MY_HEX_SELECTED":
+      return { ...state, mySelectedHexId: action.hexId };
+
+    case "MY_HEX_DESELECTED":
+      return { ...state, mySelectedHexId: null };
+
+    case "PLANNING_END":
+      return {
+        ...state,
+        planningEndsAt: null,
+      };
+
+    case "RESOLUTION_START":
+      return {
+        ...state,
+        phase: "resolution",
+        roundOrder: action.order,
+        currentDuelInfo: null,
+        hexSelections: [],
+        mySelectedHexId: null,
+        attackableHexIds: [],
+      };
+
+    case "CURRENT_DUEL_INFO":
+      return {
+        ...state,
+        currentDuelInfo: action.info,
+      };
+
+    case "ELIMINATION_ROUND":
+      return {
+        ...state,
+        phase: "playing",
+        eliminationRound: action.data,
+        eliminationResult: null,
+      };
+
+    case "ELIMINATION_RESULT":
+      return {
+        ...state,
+        eliminationResult: action.data,
+        eliminationRound: null,
+      };
+
+    case "PLAYER_SURRENDERED":
+      if (action.isMe) {
+        return {
+          ...state,
+          hasSurrendered: true,
+          duel: null,
+          tiebreaker: null,
+        };
+      }
+      return {
+        ...state,
+        surrenderMessage: `${action.data.username} surrendered! ${action.data.freedHexIds.length} territories freed.`,
+      };
+
+    // ── Duel ──────────────────────────────────────────────────────
+
     case "DUEL_STARTED":
       return {
         ...state,
@@ -238,17 +378,25 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
       return { ...state, phase: "tiebreaker", tiebreaker: action.data };
 
     case "DUEL_RESOLVED":
-      // Ignore if this resolved duel is not our active duel
-      if (!state.duel || state.duel.duelId !== action.data.duelId) return state;
-      return {
-        ...state,
-        phase: "duel-ended",
-        duel: { ...state.duel, resolved: action.data },
-        tiebreaker: null,
-      };
+      // If this is our active duel, show result
+      if (state.duel && state.duel.duelId === action.data.duelId) {
+        return {
+          ...state,
+          phase: "duel-ended",
+          duel: { ...state.duel, resolved: action.data },
+          tiebreaker: null,
+        };
+      }
+      // Otherwise it's another player's duel in resolution — stay in resolution
+      return state;
 
     case "DISMISS_DUEL":
-      return { ...state, phase: "playing", duel: null, tiebreaker: null };
+      return {
+        ...state,
+        phase: state.roundOrder.length > 0 ? "resolution" : "playing",
+        duel: null,
+        tiebreaker: null,
+      };
 
     case "PLAYER_ELIMINATED":
       return {
@@ -283,29 +431,39 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
         error: action.message,
         duel: null,
         tiebreaker: null,
-        phase: "playing",
+        phase: state.roundOrder.length > 0 ? "resolution" : "playing",
       };
 
-    case "RECONNECTED":
+    case "RECONNECTED": {
+      let phase: ConquestPhase = "playing";
+      if (action.roundPhase === "planning") phase = "planning";
+      else if (action.roundPhase === "resolution") phase = "resolution";
+
       return {
         ...state,
-        phase: "playing",
+        phase,
         hexes: action.hexes,
         players: action.players,
         matchTimerEndsAt: action.matchTimerEndsAt,
         matchId: action.matchId,
         matchCode: action.matchCode,
         leaderboard: action.leaderboard,
+        roundNumber: action.roundNumber,
+        planningEndsAt: action.planningEndsAt,
+        hexSelections: action.selections,
+        roundOrder: action.roundOrder,
+        currentDuelInfo: null,
         duel: null,
         tiebreaker: null,
         error: null,
       };
+    }
 
     case "ERROR":
       return { ...state, error: action.message };
 
     case "CLEAR_ERROR":
-      return { ...state, error: null };
+      return { ...state, error: null, surrenderMessage: null };
 
     case "RESET":
       return initialState;
@@ -320,6 +478,9 @@ function reducer(state: ConquestState, action: ConquestAction): ConquestState {
 export function useConquest() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const useCaseRef = useRef<ConquestMultiplayerUseCase | null>(null);
+  const { user } = useAuth();
+  const userIdRef = useRef(user?.id);
+  userIdRef.current = user?.id;
 
   useEffect(() => {
     const uc = new ConquestMultiplayerUseCase();
@@ -362,6 +523,56 @@ export function useConquest() {
     uc.onMapUpdate((updates) => {
       dispatch({ type: "MAP_UPDATE", updates });
     });
+
+    // ── Planning / Resolution listeners ───────────────────────────
+
+    uc.onPlanningStart((data) => {
+      dispatch({
+        type: "PLANNING_START",
+        roundNumber: data.roundNumber,
+        durationMs: data.durationMs,
+        attackableHexIds: data.attackableHexIds,
+      });
+    });
+
+    uc.onHexSelected((data) => {
+      dispatch({ type: "HEX_SELECTED", data });
+    });
+
+    uc.onHexDeselected((data) => {
+      dispatch({ type: "HEX_DESELECTED", hexId: data.hexId, userId: data.userId });
+    });
+
+    uc.onPlanningEnd(() => {
+      dispatch({ type: "PLANNING_END" });
+    });
+
+    uc.onResolutionStart((data) => {
+      dispatch({ type: "RESOLUTION_START", roundNumber: data.roundNumber, order: data.order });
+    });
+
+    uc.onCurrentDuelInfo((info) => {
+      dispatch({ type: "CURRENT_DUEL_INFO", info });
+    });
+
+    uc.onEliminationRound((data) => {
+      dispatch({ type: "ELIMINATION_ROUND", data });
+    });
+
+    uc.onEliminationResult((data) => {
+      dispatch({ type: "ELIMINATION_RESULT", data });
+    });
+
+    uc.onPlayerSurrendered((data) => {
+      const isMe = data.userId === userIdRef.current;
+      dispatch({ type: "PLAYER_SURRENDERED", data, isMe });
+      if (!isMe) {
+        // Auto-clear surrender message after 3 seconds
+        setTimeout(() => dispatch({ type: "CLEAR_ERROR" }), 3000);
+      }
+    });
+
+    // ── Duel listeners ────────────────────────────────────────────
 
     uc.onDuelStarted((data) => {
       dispatch({
@@ -422,7 +633,6 @@ export function useConquest() {
 
     uc.onOpponentDisconnected((data) => {
       dispatch({ type: "OPPONENT_DISCONNECTED", message: data.message });
-      // Auto-clear the message after 3 seconds
       setTimeout(() => dispatch({ type: "CLEAR_ERROR" }), 3000);
     });
 
@@ -435,6 +645,12 @@ export function useConquest() {
         matchId: data.matchId,
         matchCode: data.matchCode,
         leaderboard: data.leaderboard,
+        roundNumber: data.roundNumber,
+        roundPhase: data.roundPhase,
+        planningEndsAt: data.planningEndsAt,
+        selections: data.selections,
+        roundOrder: data.roundOrder,
+        currentDuelPosition: data.currentDuelPosition,
       });
     });
 
@@ -452,7 +668,6 @@ export function useConquest() {
 
     uc.onConnect(() => {
       console.log("[TC] Socket connected");
-      // Check if player has an active match they left
       uc.checkActiveMatch();
     });
 
@@ -482,6 +697,16 @@ export function useConquest() {
     dispatch({ type: "RESET" });
   }, []);
 
+  const selectHex = useCallback((hexId: string) => {
+    dispatch({ type: "MY_HEX_SELECTED", hexId });
+    useCaseRef.current?.selectHex(hexId);
+  }, []);
+
+  const deselectHex = useCallback(() => {
+    dispatch({ type: "MY_HEX_DESELECTED" });
+    useCaseRef.current?.deselectHex();
+  }, []);
+
   const attackHex = useCallback((hexId: string) => {
     useCaseRef.current?.attackHex(hexId);
   }, []);
@@ -507,6 +732,14 @@ export function useConquest() {
     useCaseRef.current?.reconnect();
   }, []);
 
+  const surrender = useCallback(() => {
+    useCaseRef.current?.surrender();
+  }, []);
+
+  const submitEliminationAnswer = useCallback((numericAnswer: number) => {
+    useCaseRef.current?.submitEliminationAnswer(numericAnswer);
+  }, []);
+
   const clearError = useCallback(() => {
     dispatch({ type: "CLEAR_ERROR" });
   }, []);
@@ -517,12 +750,16 @@ export function useConquest() {
     joinMatch,
     findMatch,
     leaveMatch,
+    selectHex,
+    deselectHex,
     attackHex,
     submitAnswer,
     submitTiebreaker,
     acceptRevenge,
     declineRevenge,
     reconnect,
+    surrender,
+    submitEliminationAnswer,
     clearError,
   };
 }

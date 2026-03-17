@@ -11,6 +11,7 @@ export const TC_WIN_THRESHOLD = 0.5; // 50%+ of hexes
 export const TC_ROOM_CODE_LENGTH = 6;
 export const TC_NEUTRAL_WIN_THRESHOLD = 3; // need 3/5 correct to conquer neutral
 export const TC_START_COUNTDOWN_S = 5;
+export const TC_PLANNING_PHASE_MS = 10_000; // 10 seconds for planning phase
 
 export const TC_PLAYER_COLORS = [
   "#ef4444", // red

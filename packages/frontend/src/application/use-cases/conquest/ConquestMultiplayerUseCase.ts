@@ -20,6 +20,14 @@ import {
   TcErrorPayload,
   TcOpponentDisconnected,
   TcReconnected,
+  TcPlanningStartData,
+  TcHexSelectedData,
+  TcHexDeselectedData,
+  TcResolutionStartData,
+  TcCurrentDuelInfo,
+  TcEliminationRoundData,
+  TcEliminationResultData,
+  TcPlayerSurrendered,
 } from "@minigames/shared";
 import { getSocket } from "../../../infrastructure/socket/socketClient";
 
@@ -50,8 +58,24 @@ export class ConquestMultiplayerUseCase {
     this.socket.emit(TcEvents.LEAVE_MATCH);
   }
 
+  selectHex(hexId: string): void {
+    this.socket.emit(TcEvents.SELECT_HEX, { hexId });
+  }
+
+  deselectHex(): void {
+    this.socket.emit(TcEvents.DESELECT_HEX);
+  }
+
+  surrender(): void {
+    this.socket.emit(TcEvents.SURRENDER);
+  }
+
   attackHex(hexId: string): void {
     this.socket.emit(TcEvents.ATTACK, { hexId });
+  }
+
+  submitEliminationAnswer(numericAnswer: number): void {
+    this.socket.emit(TcEvents.SUBMIT_ELIMINATION_ANSWER, { numericAnswer });
   }
 
   submitAnswer(duelId: string, questionIndex: number, selectedIndex: number): void {
@@ -103,6 +127,46 @@ export class ConquestMultiplayerUseCase {
   onMapUpdate(cb: EventCallback<TcMapUpdateEntry[]>): void {
     this.socket.on(TcEvents.MAP_UPDATE, cb);
   }
+
+  // ── Planning / Resolution events ───────────────────────────────
+
+  onPlanningStart(cb: EventCallback<TcPlanningStartData>): void {
+    this.socket.on(TcEvents.PLANNING_START, cb);
+  }
+
+  onHexSelected(cb: EventCallback<TcHexSelectedData>): void {
+    this.socket.on(TcEvents.HEX_SELECTED, cb);
+  }
+
+  onHexDeselected(cb: EventCallback<TcHexDeselectedData>): void {
+    this.socket.on(TcEvents.HEX_DESELECTED, cb);
+  }
+
+  onPlanningEnd(cb: EventCallback<Record<string, never>>): void {
+    this.socket.on(TcEvents.PLANNING_END, cb);
+  }
+
+  onResolutionStart(cb: EventCallback<TcResolutionStartData>): void {
+    this.socket.on(TcEvents.RESOLUTION_START, cb);
+  }
+
+  onCurrentDuelInfo(cb: EventCallback<TcCurrentDuelInfo>): void {
+    this.socket.on(TcEvents.CURRENT_DUEL_INFO, cb);
+  }
+
+  onEliminationRound(cb: EventCallback<TcEliminationRoundData>): void {
+    this.socket.on(TcEvents.ELIMINATION_ROUND, cb);
+  }
+
+  onEliminationResult(cb: EventCallback<TcEliminationResultData>): void {
+    this.socket.on(TcEvents.ELIMINATION_RESULT, cb);
+  }
+
+  onPlayerSurrendered(cb: EventCallback<TcPlayerSurrendered>): void {
+    this.socket.on(TcEvents.PLAYER_SURRENDERED, cb);
+  }
+
+  // ── Duel events ────────────────────────────────────────────────
 
   onDuelStarted(cb: EventCallback<TcDuelStarted>): void {
     this.socket.on(TcEvents.DUEL_STARTED, cb);

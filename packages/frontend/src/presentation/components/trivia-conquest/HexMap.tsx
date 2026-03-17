@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback } from "react";
-import { TcHexData } from "@minigames/shared";
+import { TcHexData, TcHexSelectedData } from "@minigames/shared";
 import { axialToPixel, calculateBounds } from "../../../domain/value-objects/HexGrid";
 import { HexTile } from "./HexTile";
 
@@ -8,12 +8,28 @@ interface HexMapProps {
   myUserId: string;
   onHexClick: (hexId: string) => void;
   isInDuel: boolean;
+  /** Planning mode: which hexes can this player attack */
+  isPlanning?: boolean;
+  attackableHexIds?: string[];
+  /** Currently selected hex by this player during planning */
+  mySelectedHexId?: string | null;
+  /** All players' selections during planning */
+  hexSelections?: TcHexSelectedData[];
 }
 
 const HEX_SIZE = 62;
 const PADDING = 28;
 
-export function HexMap({ hexes, myUserId, onHexClick, isInDuel }: HexMapProps) {
+export function HexMap({
+  hexes,
+  myUserId,
+  onHexClick,
+  isInDuel,
+  isPlanning = false,
+  attackableHexIds: planningAttackableIds,
+  mySelectedHexId,
+  hexSelections = [],
+}: HexMapProps) {
   const [selectedHexId, setSelectedHexId] = useState<string | null>(null);
 
   // My territory IDs
@@ -22,10 +38,9 @@ export function HexMap({ hexes, myUserId, onHexClick, isInDuel }: HexMapProps) {
     [hexes, myUserId]
   );
 
-  // Build neighbor map from hex data (reconstruct adjacency)
+  // Build neighbor map from hex data
   const neighborMap = useMemo(() => {
     const map = new Map<string, Set<string>>();
-    // Build coord lookup
     const coordToId = new Map<string, string>();
     for (const hex of hexes) {
       coordToId.set(`${hex.q},${hex.r}`, hex.id);
@@ -62,9 +77,27 @@ export function HexMap({ hexes, myUserId, onHexClick, isInDuel }: HexMapProps) {
     return visible;
   }, [myTerritoryIds, neighborMap]);
 
-  // Attackable hex IDs
+  // Attackable hex IDs — depends on mode
   const attackableHexIds = useMemo(() => {
     if (isInDuel) return new Set<string>();
+
+    if (isPlanning && planningAttackableIds) {
+      // During planning, use server-provided list but exclude hexes already selected by others
+      const takenByOthers = new Set(
+        hexSelections
+          .filter(s => s.userId !== myUserId)
+          .map(s => s.hexId)
+      );
+      const attackable = new Set<string>();
+      for (const hexId of planningAttackableIds) {
+        if (!takenByOthers.has(hexId)) {
+          attackable.add(hexId);
+        }
+      }
+      return attackable;
+    }
+
+    // Default: compute from neighbor map (for non-planning phases)
     const attackable = new Set<string>();
     for (const myId of myTerritoryIds) {
       const neighbors = neighborMap.get(myId);
@@ -76,7 +109,16 @@ export function HexMap({ hexes, myUserId, onHexClick, isInDuel }: HexMapProps) {
       }
     }
     return attackable;
-  }, [myTerritoryIds, neighborMap, isInDuel]);
+  }, [myTerritoryIds, neighborMap, isInDuel, isPlanning, planningAttackableIds, hexSelections, myUserId]);
+
+  // Hex selections lookup: hexId -> selection data
+  const selectionsByHex = useMemo(() => {
+    const map = new Map<string, TcHexSelectedData>();
+    for (const sel of hexSelections) {
+      map.set(sel.hexId, sel);
+    }
+    return map;
+  }, [hexSelections]);
 
   // Calculate viewport
   const bounds = useMemo(() => calculateBounds(hexes, HEX_SIZE), [hexes]);
@@ -89,11 +131,19 @@ export function HexMap({ hexes, myUserId, onHexClick, isInDuel }: HexMapProps) {
 
   const handleHexClick = useCallback(
     (hexId: string) => {
+      if (isPlanning) {
+        // During planning: select/deselect
+        if (attackableHexIds.has(hexId) || hexId === mySelectedHexId) {
+          onHexClick(hexId);
+        }
+        return;
+      }
+
       if (!attackableHexIds.has(hexId)) return;
       setSelectedHexId(hexId);
       onHexClick(hexId);
     },
-    [attackableHexIds, onHexClick]
+    [attackableHexIds, onHexClick, isPlanning, mySelectedHexId]
   );
 
   return (
@@ -114,6 +164,10 @@ export function HexMap({ hexes, myUserId, onHexClick, isInDuel }: HexMapProps) {
         />
         {hexes.map((hex) => {
           const { x, y } = axialToPixel(hex.q, hex.r, HEX_SIZE);
+          const selection = selectionsByHex.get(hex.id);
+          const isMySelection = mySelectedHexId === hex.id;
+          const isTakenByOther = selection && selection.userId !== myUserId;
+
           return (
             <HexTile
               key={hex.id}
@@ -122,10 +176,12 @@ export function HexMap({ hexes, myUserId, onHexClick, isInDuel }: HexMapProps) {
               cy={y}
               size={HEX_SIZE}
               isOwn={myTerritoryIds.has(hex.id)}
-              isAttackable={attackableHexIds.has(hex.id)}
-              isSelected={selectedHexId === hex.id}
+              isAttackable={attackableHexIds.has(hex.id) && !isMySelection}
+              isSelected={isPlanning ? isMySelection : selectedHexId === hex.id}
               isFogged={!visibleHexIds.has(hex.id)}
               onClick={() => handleHexClick(hex.id)}
+              isPlanning={isPlanning}
+              planningSelection={isTakenByOther ? selection : undefined}
             />
           );
         })}

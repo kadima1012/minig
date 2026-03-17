@@ -4,6 +4,8 @@ import {
   TcHexData,
   TcPlayerData,
   TcLeaderboardEntry,
+  TcRoundOrderEntry,
+  TcHexSelectedData,
   TC_PLAYER_COLORS,
   TC_WIN_THRESHOLD,
   TC_REVENGE_COOLDOWN_MS,
@@ -21,6 +23,8 @@ import {
 
 const CATEGORIES = Object.values(TcCategory);
 
+export type RoundPhase = "planning" | "resolution" | "between";
+
 export class TcMatch {
   public status: TcMatchStatus = TcMatchStatus.Lobby;
   public hexagons = new Map<string, TcHexagon>();
@@ -30,6 +34,25 @@ export class TcMatch {
   public endsAt: Date | null = null;
   public winnerId: string | null = null;
   public creatorId: string;
+
+  // ── Round management ──────────────────────────────────────────
+  public currentRound = 0;
+  public roundPhase: RoundPhase = "between";
+  public planningEndsAt: Date | null = null;
+  /** userId -> hexId selections during planning */
+  public hexSelections = new Map<string, string>();
+  /** hexId -> userId reverse lookup */
+  public hexSelectionsByHex = new Map<string, string>();
+  /** Resolution order for current round */
+  public roundOrder: TcRoundOrderEntry[] = [];
+  /** Current duel position in resolution (0-based) */
+  public currentDuelPosition = 0;
+  /** Temporary storage for elimination round data */
+  public eliminationData: {
+    tiebreakerQ: { numericAnswer: number; getDistance: (answer: number) => number; text: string; timeoutMs: number };
+    activePlayers: string[];
+    availableSlots: number;
+  } | null = null;
 
   private colorIndex = 0;
 
@@ -138,6 +161,42 @@ export class TcMatch {
         hex.setOwner(null, null, null);
       }
     }
+  }
+
+  /** Surrender: release all territories (become neutral), keep player in match */
+  surrenderPlayer(userId: string): string[] {
+    const freedHexIds: string[] = [];
+    for (const hex of this.hexagons.values()) {
+      if (hex.ownerId === userId) {
+        hex.setOwner(null, null, null);
+        freedHexIds.push(hex.id);
+      }
+    }
+    const player = this.players.get(userId);
+    if (player) {
+      player.clearRevenge();
+      player.isInDuel = false;
+    }
+    return freedHexIds;
+  }
+
+  /** Count how many players still have at least one territory */
+  getPlayersWithTerritoryCount(): number {
+    const owners = new Set<string>();
+    for (const hex of this.hexagons.values()) {
+      if (hex.ownerId) owners.add(hex.ownerId);
+    }
+    return owners.size;
+  }
+
+  /** Get the single remaining player with territory (if only one left) */
+  getLastPlayerWithTerritory(): string | null {
+    const owners = new Set<string>();
+    for (const hex of this.hexagons.values()) {
+      if (hex.ownerId) owners.add(hex.ownerId);
+    }
+    if (owners.size === 1) return owners.values().next().value ?? null;
+    return null;
   }
 
   getPlayer(userId: string): TcMatchPlayer | undefined {
@@ -347,6 +406,230 @@ export class TcMatch {
 
     this.activeDuels.delete(duel.id);
     return result;
+  }
+
+  // ── Round / Planning Phase ────────────────────────────────────
+
+  /** Get all hex IDs that a given player can attack (neighbor, not own).
+   *  While neutral hexes exist, only neutral neighbors are returned. */
+  getAttackableHexIds(userId: string): string[] {
+    const ownIds = this.getPlayerTerritoryIds(userId);
+    const ownSet = new Set(ownIds);
+    const attackable = new Set<string>();
+    const neutralsExist = this.hasNeutralHexes();
+
+    for (const ownId of ownIds) {
+      const hex = this.hexagons.get(ownId);
+      if (!hex) continue;
+      for (const nId of hex.neighborIds) {
+        if (ownSet.has(nId)) continue;
+        const neighbor = this.hexagons.get(nId);
+        if (!neighbor) continue;
+        // While neutrals exist, only allow attacking neutral hexes
+        if (neutralsExist && !neighbor.isNeutral()) continue;
+        attackable.add(nId);
+      }
+    }
+    return Array.from(attackable);
+  }
+
+  /** Get all unique attackable hex IDs across all active players */
+  getAllAttackableHexIds(): string[] {
+    const all = new Set<string>();
+    for (const player of this.players.values()) {
+      if (!player.connected) continue;
+      if (this.getPlayerTerritoryCount(player.userId) === 0 && !player.hasRevenge()) continue;
+      for (const hexId of this.getAttackableHexIds(player.userId)) {
+        all.add(hexId);
+      }
+    }
+    return Array.from(all);
+  }
+
+  /** Get active players (connected, have territory or revenge) */
+  getActivePlayers(): TcMatchPlayer[] {
+    const active: TcMatchPlayer[] = [];
+    for (const player of this.players.values()) {
+      if (!player.connected) continue;
+      const hasTerr = this.getPlayerTerritoryCount(player.userId) > 0;
+      if (hasTerr || player.hasRevenge()) {
+        active.push(player);
+      }
+    }
+    return active;
+  }
+
+  /** Check if there are any neutral hexes remaining */
+  hasNeutralHexes(): boolean {
+    for (const hex of this.hexagons.values()) {
+      if (hex.isNeutral()) return true;
+    }
+    return false;
+  }
+
+  /** Get all neutral hex IDs */
+  getNeutralHexIds(): string[] {
+    const neutrals: string[] = [];
+    for (const hex of this.hexagons.values()) {
+      if (hex.isNeutral()) neutrals.push(hex.id);
+    }
+    return neutrals;
+  }
+
+  /** Auto-assign a random attackable hex for players who haven't selected yet.
+   *  Returns the auto-assigned selections as {userId, hexId}[]. */
+  autoAssignUnselectedPlayers(): Array<{ userId: string; hexId: string }> {
+    const activePlayers = this.getActivePlayers();
+    const assigned: Array<{ userId: string; hexId: string }> = [];
+
+    // Collect already-selected hex IDs
+    const takenHexes = new Set(this.hexSelectionsByHex.keys());
+
+    for (const player of activePlayers) {
+      if (this.hexSelections.has(player.userId)) continue; // already selected
+
+      // Get attackable hexes not already taken
+      const attackable = this.getAttackableHexIds(player.userId)
+        .filter(id => !takenHexes.has(id));
+
+      if (attackable.length === 0) continue;
+
+      // Pick random
+      const hexId = attackable[Math.floor(Math.random() * attackable.length)];
+      this.hexSelections.set(player.userId, hexId);
+      this.hexSelectionsByHex.set(hexId, player.userId);
+      takenHexes.add(hexId);
+      assigned.push({ userId: player.userId, hexId });
+    }
+
+    return assigned;
+  }
+
+  /** Start a new planning phase */
+  startPlanningPhase(durationMs: number): void {
+    this.currentRound++;
+    this.roundPhase = "planning";
+    this.planningEndsAt = new Date(Date.now() + durationMs);
+    this.hexSelections.clear();
+    this.hexSelectionsByHex.clear();
+    this.roundOrder = [];
+    this.currentDuelPosition = 0;
+  }
+
+  /** Player selects a hex during planning */
+  selectHex(userId: string, hexId: string): { ok: boolean; reason?: string } {
+    if (this.roundPhase !== "planning") return { ok: false, reason: "Not in planning phase" };
+
+    const player = this.players.get(userId);
+    if (!player) return { ok: false, reason: "Not in match" };
+    if (!player.connected) return { ok: false, reason: "Not connected" };
+
+    // Check territory count
+    const hasTerr = this.getPlayerTerritoryCount(userId) > 0;
+    if (!hasTerr && !player.hasRevenge()) return { ok: false, reason: "No territory" };
+
+    // Validate hex is attackable by this player
+    const attackable = this.getAttackableHexIds(userId);
+    // Also allow revenge hex
+    const canAttack = attackable.includes(hexId) ||
+      (player.hasRevenge() && player.revengeTargetHexId === hexId);
+    if (!canAttack) return { ok: false, reason: "Cannot attack this hex" };
+
+    // Check if hex already selected by another player
+    const existingSelector = this.hexSelectionsByHex.get(hexId);
+    if (existingSelector && existingSelector !== userId) {
+      return { ok: false, reason: "Hex already selected by another player" };
+    }
+
+    // Deselect previous if any
+    const prevHex = this.hexSelections.get(userId);
+    if (prevHex) {
+      this.hexSelectionsByHex.delete(prevHex);
+    }
+
+    // Select new hex
+    this.hexSelections.set(userId, hexId);
+    this.hexSelectionsByHex.set(hexId, userId);
+    return { ok: true };
+  }
+
+  /** Player deselects their hex during planning */
+  deselectHex(userId: string): string | null {
+    const hexId = this.hexSelections.get(userId);
+    if (!hexId) return null;
+    this.hexSelections.delete(userId);
+    this.hexSelectionsByHex.delete(hexId);
+    return hexId;
+  }
+
+  /** End planning and build resolution order */
+  buildResolutionOrder(): TcRoundOrderEntry[] {
+    this.roundPhase = "resolution";
+    this.planningEndsAt = null;
+
+    // Build order from selections, randomize
+    const entries: TcRoundOrderEntry[] = [];
+    for (const [userId, hexId] of this.hexSelections) {
+      const player = this.players.get(userId);
+      if (!player) continue;
+      const hex = this.hexagons.get(hexId);
+      if (!hex) continue;
+
+      entries.push({
+        userId: player.userId,
+        username: player.username,
+        color: player.color,
+        targetHexId: hexId,
+        targetHexCategory: hex.category,
+        isNeutral: hex.isNeutral(),
+      });
+    }
+
+    // Shuffle randomly
+    for (let i = entries.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [entries[i], entries[j]] = [entries[j], entries[i]];
+    }
+
+    this.roundOrder = entries;
+    this.currentDuelPosition = 0;
+    return entries;
+  }
+
+  /** Get current selections as data for clients */
+  getSelectionsData(): TcHexSelectedData[] {
+    const data: TcHexSelectedData[] = [];
+    for (const [userId, hexId] of this.hexSelections) {
+      const player = this.players.get(userId);
+      if (!player) continue;
+      data.push({
+        hexId,
+        userId: player.userId,
+        username: player.username,
+        color: player.color,
+      });
+    }
+    return data;
+  }
+
+  /** Check if elimination round is needed (more players than available hexes) */
+  needsEliminationRound(): { needed: boolean; activePlayers: TcMatchPlayer[]; availableHexCount: number } {
+    const activePlayers = this.getActivePlayers();
+    const allAttackable = this.getAllAttackableHexIds();
+    return {
+      needed: allAttackable.length > 0 && allAttackable.length < activePlayers.length,
+      activePlayers,
+      availableHexCount: allAttackable.length,
+    };
+  }
+
+  /** End round and go to between state */
+  endRound(): void {
+    this.roundPhase = "between";
+    this.hexSelections.clear();
+    this.hexSelectionsByHex.clear();
+    this.roundOrder = [];
+    this.currentDuelPosition = 0;
   }
 
   // ── Win Condition ──────────────────────────────────────────────
