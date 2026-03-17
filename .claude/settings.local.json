@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(npm run:*)",
-      "Bash(netstat -ano)"
+      "Bash(netstat -ano)",
+      "Bash(find /d/Tech/minigames/packages -type f -name *trivia*conquest*)",
+      "Bash(find /d/Tech/minigames/packages -type f \\\\\\(-name *.svg -o -name *canvas* -o -name *svg* \\\\\\))",
+      "Bash(find /d/Tech/minigames/packages/backend/src/domain -type f -name *Tc*)",
+      "Bash(find /d/Tech/minigames/packages/backend/src/presentation -type f -name *trivia*conquest* -o -name *tc*)"
     ]
   }
 }

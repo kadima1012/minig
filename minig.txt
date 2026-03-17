@@ -20,6 +20,7 @@ Cum monitizezi?
 Ce se intampla din punct de vedere endpointuri?
 
 Ameliorare trivia: 
+Cred ca e prea mare nebunie avand in vedere ca jucatorii pot ataca incontinuu, ce parere ai?
 Mai mult timp pentru a alege un raspuns. 
 Live chat?
 Am dat leave dintr-un joc intr-unul din teste, am ajuns inapoi la meniul cu minigames, am incercat sa dau la un alt trivia dar spunea "allready in a game" 
@@ -28,3 +29,5 @@ Alianțe temporare — 2 jucători se aliază contra unui "imperiu" mare, split 
 Evenimente random pe hartă — "hex-ul X devine vulnerabil 30s" sau "categoria se schimbă"
 Custom questions — jucătorii propun întrebări, votate de comunitate
 Turnee — bracket elimination cu premii
+Arata numele unui singur jucator la inceputul jocului. As vrea sa am un loading screen cu toti jucatorii care sunt in meci, ceva aratos. 
+

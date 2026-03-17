@@ -10,8 +10,8 @@ interface HexMapProps {
   isInDuel: boolean;
 }
 
-const HEX_SIZE = 40;
-const PADDING = 20;
+const HEX_SIZE = 62;
+const PADDING = 28;
 
 export function HexMap({ hexes, myUserId, onHexClick, isInDuel }: HexMapProps) {
   const [selectedHexId, setSelectedHexId] = useState<string | null>(null);
@@ -103,6 +103,15 @@ export function HexMap({ hexes, myUserId, onHexClick, isInDuel }: HexMapProps) {
         className="w-full h-full max-h-[70vh]"
         preserveAspectRatio="xMidYMid meet"
       >
+        {/* Map background */}
+        <rect
+          x={bounds.minX - PADDING}
+          y={bounds.minY - PADDING}
+          width={bounds.width + PADDING * 2}
+          height={bounds.height + PADDING * 2}
+          fill="#c8ccb8"
+          rx={8}
+        />
         {hexes.map((hex) => {
           const { x, y } = axialToPixel(hex.q, hex.r, HEX_SIZE);
           return (
